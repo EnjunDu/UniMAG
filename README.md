@@ -1,4 +1,4 @@
 # UniMAG
-MultiModal Attribute Graph Piplines
+MultiModal Attribute Graph Pipelines
 
-The datasets are given the given in huggingface https://huggingface.co/datasets/enjun-collab/MMAGs .
+The datasets are given in huggingface https://huggingface.co/datasets/enjun-collab/MMAGs .
