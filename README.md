@@ -7,7 +7,10 @@ The datasets are given in huggingface [https://huggingface.co/datasets/enjun-col
 
 ## Dataset Description
 
+Below datasets can be found in either https://huggingface.co/datasets/Sherirto/MAGB or  https://huggingface.co/datasets/mm-graph-org/mm-graph .
+
 ### books-lp
+
 A **book preference graph** for link‐prediction: predict which books a user will like together.  
 #### Common evaluation indicators
     MRR、H@1、H@10
