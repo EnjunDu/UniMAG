@@ -2,7 +2,7 @@
 # Git LFS automatic directory-by-directory commit script
 
 folders=(
-  “books-lp”
+  "books-lp"
   "books-nc"
   "cloth-copurchase"
   "ele-fashion"
