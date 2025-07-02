@@ -1,0 +1,33 @@
+# 1. 管道运行设置
+pipeline_settings:
+  environment: "local"      # 运行环境: "local" 或 "server"
+  force_reprocess: false    # 是否强制重新处理已存在的特征文件
+  batch_size: 8             # 编码时使用的批处理大小
+
+# 2. 编码器设置
+encoder_settings:
+  # 使用的编码器模型 (Hugging Face 模型名称)
+  model_name: "Qwen/Qwen2.5-VL-7B-Instruct"
+  
+  # 缓存目录 (可选, 留空则使用Hugging Face默认缓存)
+  # cache_dir: "/path/to/your/cache"
+  
+  # 运行设备 (可选, 留空则自动检测 "cuda" 或 "cpu")
+  # device: "cuda:0"
+  
+  # 目标维度 (可选, 如果不指定或为null, 则使用模型的原生维度)
+  target_dimensions:
+    text: 768
+    image: 768
+    # multimodal: 768 # 如果需要, 也可以为多模态指定维度
+
+# 3. 数据集处理设置
+dataset_settings:
+  # 要处理的数据集列表 (可选, 留空或省略则处理hugging_face/下的所有数据集)
+  datasets_to_process:
+    - "books-nc"
+  
+  # 要为这些数据集处理的模态列表
+  modalities_to_process:
+    - "text"
+    - "image"
