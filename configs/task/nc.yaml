@@ -1,0 +1,8 @@
+name: nc
+n_epochs: 300
+lr: 0.0005
+fewshots: False
+weight_decay: 1e-5
+n_runs: 3
+self_loop: True
+undirected: True
