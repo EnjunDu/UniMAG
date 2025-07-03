@@ -1,7 +1,7 @@
 """
 嵌入管理器 (EmbeddingManager)
 
-这是为整个UniMAG项目提供的、用于访问和管理所有预生成嵌入向量的官方高级API。
+这是为整个UniMAG项目提供的、用于访问和管理所有预生成嵌入向量的API。
 它的目标是为下游任务（如节点分类、链接预测）的开发者提供一个极其简洁的接口，
 让他们可以轻松获取所需特征，而无需关心特征是如何生成、存储或命名的。
 """
@@ -9,7 +9,7 @@
 import sys
 from pathlib import Path
 import numpy as np
-from typing import Optional
+from typing import Optional, Union
 
 # 将项目根目录添加到Python路径中
 project_root = Path(__file__).resolve().parent.parent
@@ -23,12 +23,16 @@ class EmbeddingManager:
     """
     一个高级API，用于获取和查看预先生成的嵌入向量。
     """
-    def __init__(self):
+    def __init__(self, base_path: Optional[Union[str, Path]] = None):
         """
         初始化嵌入管理器。
-        使用默认的服务器路径配置来初始化底层的存储管理器。
+
+        Args:
+            base_path (Optional[Union[str, Path]]):
+                数据集的根目录路径。如果未提供，
+                将使用StorageManager中的默认路径 (例如 /home/ai/MMAG)。
         """
-        self._storage = StorageManager()
+        self._storage = StorageManager(base_path=base_path)
 
     def get_embedding(
         self,
@@ -99,8 +103,12 @@ if __name__ == '__main__':
     # === 使用示例 ===
     print("=== EmbeddingManager 使用示例 ===")
     
-    # 1. 初始化管理器 (通常在你的项目代码的某个地方进行)
+    # 1. 初始化管理器
+    # 默认情况下，它会使用StorageManager的默认路径
     manager = EmbeddingManager()
+    
+    # 或者，你可以提供一个自定义路径
+    # local_manager = EmbeddingManager(base_path="./hugging_face")
 
     # 2. 获取嵌入向量
     print("\n--- 示例1: 获取 'books-nc-50' 的文本特征 ---")
