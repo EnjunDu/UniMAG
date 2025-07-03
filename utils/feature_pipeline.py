@@ -377,8 +377,9 @@ def main():
     parser = argparse.ArgumentParser(description="通过配置文件运行特征提取管道。")
     parser.add_argument(
         "-c", "--config",
-        required=True,
+        required=False,
         help="指向YAML配置文件的路径。",
+        default="configs/embedding/qwen2.5-vl-3b.yaml"
     )
     args = parser.parse_args()
     

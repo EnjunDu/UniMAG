@@ -13,7 +13,7 @@ encoder_settings:
   # cache_dir: "/path/to/your/cache"
   
   # 运行设备 (可选, 留空则自动检测 "cuda" 或 "cpu")
-  # device: "cuda:0"
+  device: "cuda:1"
   
   # 目标维度 (可选, 如果不指定或为null, 则使用模型的原生维度)
   target_dimensions:
@@ -29,6 +29,6 @@ dataset_settings:
   
   # 要为这些数据集处理的模态列表
   modalities_to_process:
-    # - "text"
+    - "text"
     - "image"
     - "multimodal"

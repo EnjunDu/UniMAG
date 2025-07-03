@@ -248,16 +248,151 @@ class QwenVLEncoderWithDimension(QwenVLEncoder):
         return self.dimension_reducer.transform(embeddings)
 
     def encode_text(self, texts: List[str], **kwargs) -> np.ndarray:
-        native_embeddings = super().encode_text(texts, **kwargs)
-        return self._apply_dimension_reduction(native_embeddings)
+        """编码纯文本，使用模型原生维度然后降维"""
+        if not texts:
+            return np.empty((0, self.target_dimension))
+
+        # 临时重置get_native_embedding_dim以获取真实的模型维度
+        model_native_dim = super().get_native_embedding_dim()
+        
+        final_embeddings = np.zeros((len(texts), model_native_dim), dtype=np.float16)
+        
+        non_empty_texts, non_empty_indices = [], []
+        for i, text in enumerate(texts):
+            if text and text.strip():
+                non_empty_texts.append(text)
+                non_empty_indices.append(i)
+
+        if not non_empty_texts:
+            return self._apply_dimension_reduction(final_embeddings)
+
+        batch_size = kwargs.get('batch_size', 8)
+        
+        with torch.no_grad():
+            for i in tqdm(range(0, len(non_empty_texts), batch_size), desc="编码文本"):
+                batch_texts = non_empty_texts[i:i + batch_size]
+                
+                messages_batch = [[{"role": "user", "content": [{"type": "text", "text": text}]}] for text in batch_texts]
+                texts_formatted = [self.processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False) for msgs in messages_batch]
+                
+                inputs = self.processor(text=texts_formatted, padding=True, return_tensors="pt").to(self.device)
+                
+                text_model = self.model.model
+                outputs = text_model(input_ids=inputs['input_ids'], attention_mask=inputs['attention_mask'], output_hidden_states=True)
+                hidden_states = outputs.hidden_states[-1]
+                
+                batch_embeddings = self._extract_embeddings_from_hidden_states(hidden_states, inputs.attention_mask)
+                
+                original_indices_in_full_list = [non_empty_indices[j] for j in range(i, i + len(batch_texts))]
+                final_embeddings[original_indices_in_full_list, :] = batch_embeddings
+
+        return self._apply_dimension_reduction(final_embeddings)
     
     def encode_image(self, image_paths: List[str], **kwargs) -> np.ndarray:
-        native_embeddings = super().encode_image(image_paths, **kwargs)
-        return self._apply_dimension_reduction(native_embeddings)
+        """编码纯图像，使用模型原生维度然后降维"""
+        if not image_paths:
+            return np.empty((0, self.target_dimension))
+
+        # 获取真实的模型维度
+        model_native_dim = super().get_native_embedding_dim()
+        
+        final_embeddings = np.zeros((len(image_paths), model_native_dim), dtype=np.float16)
+
+        non_empty_paths, non_empty_indices = [], []
+        for i, path in enumerate(image_paths):
+            # 检查路径是否有效
+            if path and str(path).strip() and Path(path).exists():
+                non_empty_paths.append(path)
+                non_empty_indices.append(i)
+
+        if not non_empty_paths:
+            return self._apply_dimension_reduction(final_embeddings)
+
+        batch_size = kwargs.get('batch_size', 4)
+
+        with torch.no_grad():
+            for i in tqdm(range(0, len(non_empty_paths), batch_size), desc="编码图像"):
+                batch_paths = non_empty_paths[i:i + batch_size]
+                
+                messages_batch = [[{"role": "user", "content": [{"type": "image", "image": f"file://{path}"}, {"type": "text", "text": "描述这张图片"}]}] for path in batch_paths]
+                texts_formatted = [self.processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False) for msgs in messages_batch]
+                image_inputs, _ = process_vision_info(messages_batch)
+                
+                inputs = self.processor(text=texts_formatted, images=image_inputs, padding=True, return_tensors="pt").to(self.device)
+                
+                outputs = self.model(**inputs, output_hidden_states=True)
+                hidden_states = outputs.hidden_states[-1]
+                
+                batch_embeddings = self._extract_embeddings_from_hidden_states(hidden_states, inputs.attention_mask)
+                
+                original_indices_in_full_list = [non_empty_indices[j] for j in range(i, i + len(batch_paths))]
+                final_embeddings[original_indices_in_full_list, :] = batch_embeddings
+
+        return self._apply_dimension_reduction(final_embeddings)
     
     def encode_multimodal(self, texts: List[str], image_paths: List[str], **kwargs) -> np.ndarray:
-        native_embeddings = super().encode_multimodal(texts, image_paths, **kwargs)
-        return self._apply_dimension_reduction(native_embeddings)
+        """编码多模态数据，使用模型原生维度然后降维"""
+        if len(texts) != len(image_paths):
+            raise ValueError("文本和图像列表的长度必须相等")
+
+        if not texts:
+            return np.empty((0, self.target_dimension))
+
+        # 获取真实的模型维度
+        model_native_dim = super().get_native_embedding_dim()
+        
+        final_embeddings = np.zeros((len(texts), model_native_dim), dtype=np.float16)
+
+        # 筛选出文本和图像都有效的对
+        valid_indices = []
+        valid_texts = []
+        valid_image_paths = []
+
+        for i, (text, path) in enumerate(zip(texts, image_paths)):
+            if text and str(path).strip() and Path(path).exists():
+                valid_indices.append(i)
+                valid_texts.append(text)
+                valid_image_paths.append(path)
+        
+        if not valid_texts:
+            return self._apply_dimension_reduction(final_embeddings)
+
+        batch_size = kwargs.get('batch_size', 4)
+        
+        with torch.no_grad():
+            for i in tqdm(range(0, len(valid_texts), batch_size), desc="编码多模态"):
+                batch_texts = valid_texts[i:i + len(valid_texts)]
+                batch_paths = valid_image_paths[i:i + len(valid_texts)]
+                
+                messages_batch = []
+                for text, path in zip(batch_texts, batch_paths):
+                    messages_batch.append([{
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": f"file://{path}"},
+                            {"type": "text", "text": text}
+                        ]
+                    }])
+                
+                texts_formatted = [self.processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False) for msgs in messages_batch]
+                image_inputs, _ = process_vision_info(messages_batch)
+                
+                inputs = self.processor(text=texts_formatted, images=image_inputs, padding=True, return_tensors="pt").to(self.device)
+                
+                outputs = self.model(**inputs, output_hidden_states=True)
+                hidden_states = outputs.hidden_states[-1]
+                
+                batch_embeddings = self._extract_embeddings_from_hidden_states(hidden_states, inputs.attention_mask)
+                
+                original_indices_in_full_list = [valid_indices[j] for j in range(i, i + len(batch_texts))]
+                final_embeddings[original_indices_in_full_list, :] = batch_embeddings
+
+        return self._apply_dimension_reduction(final_embeddings)
     
     def get_native_embedding_dim(self) -> int:
+        # 对于维度变换编码器，返回目标维度
         return self.target_dimension
+    
+    def get_model_native_embedding_dim(self) -> int:
+        # 返回模型真实的原生维度
+        return super().get_native_embedding_dim()
