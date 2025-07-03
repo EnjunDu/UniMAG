@@ -16,7 +16,7 @@ class QualityChecker:
     def __init__(self, 
                  nan_threshold: float = 0.01,
                  inf_threshold: float = 0.01,
-                 zero_threshold: float = 0.1):
+                 zero_threshold: float = 0.95): # 允许多模态的零值比例更高
         """
         初始化质量检查器
         
@@ -153,22 +153,30 @@ class QualityChecker:
             logger.warning(f"{name}: 无法计算空矩阵的分布统计")
             return {}
         
-        # 过滤掉NaN和Inf值
-        finite_mask = np.isfinite(embeddings)
-        finite_embeddings = embeddings[finite_mask]
-        
-        if finite_embeddings.size == 0:
-            logger.warning(f"{name}: 没有有效的数值进行统计")
-            return {}
-        
-        stats = {
-            "mean": float(np.mean(finite_embeddings)),
-            "std": float(np.std(finite_embeddings)),
-            "min": float(np.min(finite_embeddings)),
-            "max": float(np.max(finite_embeddings)),
-            "median": float(np.median(finite_embeddings)),
-            "finite_ratio": finite_embeddings.size / embeddings.size
-        }
+        # 使用 with warnings.catch_warnings() 来优雅地处理计算中可能出现的警告
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            
+            # 过滤掉NaN和Inf值
+            finite_mask = np.isfinite(embeddings)
+            finite_embeddings = embeddings[finite_mask]
+            
+            if finite_embeddings.size == 0:
+                logger.warning(f"{name}: 没有有效的数值进行统计")
+                return {
+                    "mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0,
+                    "median": 0.0, "finite_ratio": 0.0
+                }
+            
+            # 在进行统计计算时，使用更高精度的float64来防止溢出
+            stats = {
+                "mean": float(np.mean(finite_embeddings, dtype=np.float64)),
+                "std": float(np.std(finite_embeddings, dtype=np.float64)),
+                "min": float(np.min(finite_embeddings)),
+                "max": float(np.max(finite_embeddings)),
+                "median": float(np.median(finite_embeddings)),
+                "finite_ratio": finite_embeddings.size / embeddings.size
+            }
         
         logger.info(f"{name}: 分布统计 - "
                    f"均值: {stats['mean']:.4f}, "
@@ -229,7 +237,7 @@ class QualityChecker:
         
         # 评估整体质量
         overall_quality = report["completeness"]["is_complete"]
-        if expected_dim is not None:
+        if "dimensions" in report and report["dimensions"] is not None:
             overall_quality = overall_quality and report["dimensions"]["dimension_correct"]
         
         report["overall_quality"] = overall_quality
@@ -306,12 +314,13 @@ if __name__ == "__main__":
     checker = QualityChecker()
     
     # 创建测试数据
-    test_embeddings = np.random.randn(100, 768)
+    test_embeddings = np.random.randn(100, 768).astype(np.float32)
     
     # 添加一些质量问题
     test_embeddings[0, 0] = np.nan  # 添加NaN
     test_embeddings[1, 1] = np.inf  # 添加Inf
     test_embeddings[2:5, :] = 0     # 添加零值
+    test_embeddings[6, :] = 1e30    # 添加可能导致溢出的值
     
     print("=== 质量检查器测试 ===")
     

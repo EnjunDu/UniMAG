@@ -2,7 +2,9 @@ import os
 import numpy as np
 from pathlib import Path
 from typing import List, Optional, Union
+import logging
 
+logger = logging.getLogger(__name__)
 
 class StorageManager:
     """存储管理器，负责管理数据集特征文件的存储路径和命名规范"""
@@ -11,20 +13,19 @@ class StorageManager:
         self.environment = environment
         
         if base_path:
-            self.base_path = base_path
+            self.base_path = Path(base_path)
         elif environment == "server":
-            self.base_path = "/home/ai/ylzuo/UniMAG/hugging_face"
-            self.model_path = "/home/ai/huggingface"
+            self.base_path = Path("/home/ai/ylzuo/UniMAG/hugging_face")
+            self.model_path = Path("/home/ai/huggingface")
         else:
-            self.base_path = "hugging_face"
+            self.base_path = Path("hugging_face")
             self.model_path = None
             
         self._ensure_directory_exists(self.base_path)
     
-    def _ensure_directory_exists(self, path):
+    def _ensure_directory_exists(self, path: Path):
         """确保目录存在，不存在则创建"""
-        if not os.path.exists(path):
-            os.makedirs(path)
+        path.mkdir(parents=True, exist_ok=True)
     
     def get_feature_path(self,
                          dataset_name: str,
@@ -32,8 +33,8 @@ class StorageManager:
                          encoder_name: str,
                          dimension: Optional[int]) -> Path:
         """根据命名规范生成特征文件的完整路径"""
-        feature_dir = Path(self.base_path) / dataset_name / f"{modality}_features"
-        feature_dir.mkdir(parents=True, exist_ok=True)
+        feature_dir = self.base_path / dataset_name / f"{modality}_features"
+        self._ensure_directory_exists(feature_dir)
 
         # 处理编码器名称中的特殊字符
         safe_encoder_name = encoder_name.replace('/', '_').replace('-', '_').replace('.', '_')
@@ -55,21 +56,25 @@ class StorageManager:
 
     def get_dataset_metadata_path(self, dataset_name: str) -> Path:
         """获取数据集元数据文件路径"""
-        dataset_dir = Path(self.base_path) / dataset_name
-        dataset_dir.mkdir(parents=True, exist_ok=True)
+        dataset_dir = self.base_path / dataset_name
+        self._ensure_directory_exists(dataset_dir)
         return dataset_dir / "metadata.yaml"
 
     def get_dataset_path(self, dataset_name: str) -> Path:
         """获取数据集目录路径"""
-        dataset_path = Path(self.base_path) / dataset_name
-        dataset_path.mkdir(parents=True, exist_ok=True)
+        dataset_path = self.base_path / dataset_name
+        self._ensure_directory_exists(dataset_path)
         return dataset_path
     
     def save_features(self, embeddings: np.ndarray, feature_path: Union[str, Path]) -> None:
-        """保存特征向量到文件"""
+        """保存特征向量到文件，并统一数据类型为float32"""
         feature_path = Path(feature_path)
-        feature_path.parent.mkdir(parents=True, exist_ok=True)
-        np.save(feature_path, embeddings)
+        self._ensure_directory_exists(feature_path.parent)
+        
+        # 在保存前，将数据类型统一转换为float32
+        embeddings_as_float32 = embeddings.astype(np.float32)
+        np.save(feature_path, embeddings_as_float32)
+        logger.info(f"特征已作为float32类型保存到: {feature_path}")
     
     def load_features(self, feature_path: Union[str, Path]) -> np.ndarray:
         """从文件加载特征向量"""
@@ -77,12 +82,11 @@ class StorageManager:
     
     def list_datasets(self) -> List[str]:
         """列出所有可用的数据集"""
-        base_path = Path(self.base_path)
-        if not base_path.exists():
+        if not self.base_path.exists():
             return []
         
         datasets = []
-        for item in base_path.iterdir():
+        for item in self.base_path.iterdir():
             if item.is_dir() and not item.name.startswith('.'):
                 datasets.append(item.name)
         
