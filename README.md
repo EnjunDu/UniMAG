@@ -1,7 +1,7 @@
 # UniMAG
 **MultiModal Attribute Graph Pipelines**
 
-The datasets are given in huggingface [https://huggingface.co/datasets/enjun-collab/MMAGs](https://huggingface.co/datasets/enjun-collab/MMAG) .
+The datasets are given in huggingface [https://huggingface.co/datasets/enjun-collab/MMAG](https://huggingface.co/datasets/enjun-collab/MMAG) .
 
 
 
@@ -149,3 +149,155 @@ A **toy product graph** for node‐classification and link‐prediction: classif
 * `Toys.csv`: CSV of `{ id, title, description }` for each toy.  
 * `ToysImages.tar.gz`: Compressed raw toy images.  
 * `ToysGraph.pt`: DGLGraph object containing adjacency and feature placeholders.
+<<<<<<< HEAD
+
+
+
+
+
+
+
+## **Task Summary**
+
+
+
+
+
+### Key Points to Note:
+
+- **Finetune simple models (GCN, GAT) to support modality-level and entity-level outputs**
+
+- Be mindful of the **supervised loss function** corresponding to each downstream task; we need to implement simple versions, e.g., cross-entropy for graph-centric classification tasks
+
+- Multimodal-centric downstream tasks are more complex. Pay attention to class inheritance in the benchmark; the hierarchy is as follows:
+
+  - Quality Evaluation
+
+    - Modality Matching
+    - Modality Retrieval
+    - Modality Alignment
+    
+  - Creative Generation
+  
+    - G2Text
+    - G2Image
+    - GT2Image
+    - GT2Text
+    - G2TextImage
+    
+  
+- Final Output
+
+  - **Modality-level**: Embedding of each modality within each node
+  - **Entity-level**: Representation of the entire node based on its modality embeddings
+
+  
+
+### Graph-centric tasks 【Yushuo LI】:
+
+  
+
+  - **Semantic Level** - Node-level: Node classification, Node clustering
+  - **Semantic Level** - Edge-level: Edge existence prediction, Edge classification
+  - **Semantic Level** - Graph-level: Graph classification, Community detection (subgraphs)
+
+  
+
+### Multimodal-centric tasks
+
+
+
+#### **Quality Evaluation Tasks**【Yilong ZUO】
+
+
+
+- **Modality-level**: Modality Matching
+
+  
+
+  - Traditional: Input any image and text, get respective embeddings, return a matching score
+  - MAG-specific: Given any image-text pair from a node in MAG, compute a matching score (e.g., CLIP-score) based on embeddings
+
+  
+
+- **Modality-level**: Modality Retrieval
+
+  
+
+  - Traditional: Given an image or text, obtain a query embedding and retrieve the most relevant item from a pool of candidates
+  - MAG-specific: Use any image-text from a MAG node as a query and return relevant items from others
+
+  
+
+- **Modality-level**: Modality Alignment
+
+  
+
+  - Traditional: Fine-grained modality matching focusing on matching degree (detailed descriptions)
+  - MAG-specific: Given any image-text pair from a MAG node, return fine-grained alignment details based on embeddings
+
+  
+
+
+
+#### **Creative Generation Tasks**
+
+
+
+- MAG-specific【Modality/Semantic level】graph (image, text) + prompt → text 【G2Text】【Yaxin DENG】
+
+  
+
+  - Input: Current node embedding + (optional) contextual info around the node [subgraph]
+  - Multimodal interaction: Integrate embedding with prompt template and input to the language model
+  - Output: Summary and analysis of the node, including its attributes and neighborhood info
+
+  
+
+- 【Modality/Semantic level】Image Annotation 【G2Image】【Zhenning ZHANG】
+
+  
+
+  - Traditional: Generate an explanatory image from a text
+  - MAG-specific: Similar to G2Text, combine embeddings and prompt, then input to image generator
+
+  
+
+- MAG-specific【Modality-level】graph (image) + text [prompt] → image 【GT2Image】【Sicheng LIU】
+
+  
+
+  - Input: Embeddings of current node (multiple images) + (optional) context [subgraph] + text description
+  - Multimodal interaction: Use image/text embeddings as graph/text prompt tokens for diffusion model
+  - Output: Image satisfying the textual instruction
+  - Belongs to the same category as traditional **image editing or reconstruction**
+
+  
+
+- 【Modality-level】Story Generation 【GT2Text】
+
+  
+
+  - Traditional: Generate a story from one or more images
+  - MAG-specific: Similar to GT2Image — locate a sequence of images in MAG to create graph prompt tokens, combine with text prompt to generate the story
+
+  
+
+- 【Modality-level】Fusion Response 【G2TextImage】
+
+  
+
+  - Traditional: Model generates both text and image as part of the response
+  - MAG-specific: Given a query (text prompt), retrieve relevant modality info from MAG and organize a multimodal response
+
+  
+
+- Summary
+
+  
+
+  - G2Text: Textual annotation for node/subgraph
+  - G2Image: Visual annotation for node/subgraph
+  - GT2Image: Image editing or reconstruction
+  - GT2Text: Story generation
+  - G2TextImage: Multimodal response generation

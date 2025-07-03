@@ -1,15 +1,15 @@
 # 1. 管道运行设置
 pipeline_settings:
   force_reprocess: false
-  batch_size: 16
+  batch_size: 32
 
 # 2. 编码器设置
 encoder_settings:
-  encoder_type: "qwen_vl"
-  model_name: "Qwen/Qwen2.5-VL-3B-Instruct"
+  encoder_type: "intern_vl"
+  model_name: "OpenGVLab/InternVL3-1B-hf"
   device: "cuda:1"
   target_dimensions:
-    image: 768
+    multimodal: 768
 
 # 3. 数据集处理设置
 dataset_settings:
@@ -17,4 +17,4 @@ dataset_settings:
   datasets_to_process:
     - "Grocery"
   modalities_to_process:
-    - "image"
+    - "multimodal"
