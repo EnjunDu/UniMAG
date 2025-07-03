@@ -8,5 +8,6 @@ docs
 test_embedding_system.py
 **/__pycache__
 MAGB
+MMAG
 mm-graph-benchmark
 .DS_Store
