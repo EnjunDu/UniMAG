@@ -44,7 +44,13 @@ class QwenVLEncoder(BaseEncoder):
     def _load_model(self, **kwargs) -> None:
         try:
             logger.info(f"正在加载模型: {self.model_name}")
-            self.processor = AutoProcessor.from_pretrained(self.model_name, cache_dir=self.cache_dir, trust_remote_code=True)
+            # 启用新的、更快的图像处理器以提升性能
+            self.processor = AutoProcessor.from_pretrained(
+                self.model_name,
+                cache_dir=self.cache_dir,
+                trust_remote_code=True,
+                use_fast=True
+            )
             
             model_kwargs = {"cache_dir": self.cache_dir, "trust_remote_code": True}
 
