@@ -23,15 +23,12 @@ class EmbeddingManager:
     """
     一个高级API，用于获取和查看预先生成的嵌入向量。
     """
-    def __init__(self, environment: str = "server"):
+    def __init__(self):
         """
         初始化嵌入管理器。
-
-        Args:
-            environment (str): 运行环境 ("server" 或 "local")，
-                               这决定了数据集和模型的根路径。
+        使用默认的服务器路径配置来初始化底层的存储管理器。
         """
-        self._storage = StorageManager(environment=environment)
+        self._storage = StorageManager()
 
     def get_embedding(
         self,
@@ -103,8 +100,7 @@ if __name__ == '__main__':
     print("=== EmbeddingManager 使用示例 ===")
     
     # 1. 初始化管理器 (通常在你的项目代码的某个地方进行)
-    # 假设我们在服务器环境
-    manager = EmbeddingManager(environment="server")
+    manager = EmbeddingManager()
 
     # 2. 获取嵌入向量
     print("\n--- 示例1: 获取 'books-nc-50' 的文本特征 ---")

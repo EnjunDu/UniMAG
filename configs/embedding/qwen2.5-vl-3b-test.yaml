@@ -1,6 +1,5 @@
 # 1. 管道运行设置
 pipeline_settings:
-  environment: "server"      # 运行环境: "local" 或 "server"，前者在本地运行，后者在服务器运行
   force_reprocess: true    # 是否强制重新处理已存在的特征文件
   batch_size: 8             # 编码时使用的批处理大小
 

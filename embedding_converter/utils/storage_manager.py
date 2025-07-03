@@ -9,17 +9,19 @@ logger = logging.getLogger(__name__)
 class StorageManager:
     """存储管理器，负责管理数据集特征文件的存储路径和命名规范"""
     
-    def __init__(self, environment="local", base_path=None):
-        self.environment = environment
-        
+    def __init__(self, base_path: Optional[Union[str, Path]] = None):
+        """
+        初始化存储管理器。
+
+        Args:
+            base_path (Optional[Union[str, Path]]):
+                可选参数，用于覆盖默认的数据集根路径。
+                如果为None，则使用服务器的默认路径 /home/ai/MMAG。
+        """
         if base_path:
             self.base_path = Path(base_path)
-        elif environment == "server":
-            self.base_path = Path("/home/ai/ylzuo/UniMAG/hugging_face")
-            self.model_path = Path("/home/ai/huggingface")
         else:
-            self.base_path = Path("hugging_face")
-            self.model_path = None
+            self.base_path = Path("/home/ai/MMAG")
             
         self._ensure_directory_exists(self.base_path)
     

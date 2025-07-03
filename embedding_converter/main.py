@@ -51,7 +51,6 @@ class FeaturePipeline:
         encoder_cfg = config.get("encoder_settings", {})
         dataset_cfg = config.get("dataset_settings", {})
 
-        self.environment = pipeline_cfg.get("environment", "local")
         self.force_reprocess = pipeline_cfg.get("force_reprocess", False)
         self.batch_size = pipeline_cfg.get("batch_size", 8)
 
@@ -64,13 +63,9 @@ class FeaturePipeline:
         self.datasets_to_process = dataset_cfg.get("datasets_to_process")
         self.modalities_to_process = dataset_cfg.get("modalities_to_process", ["text", "image"])
         
-        self.storage_manager = StorageManager(self.environment)
+        self.storage_manager = StorageManager()
         
         self.cache_dir = encoder_cfg.get("cache_dir")
-        if not self.cache_dir:
-            if hasattr(self.storage_manager, 'model_path') and self.storage_manager.model_path:
-                self.cache_dir = self.storage_manager.model_path
-                logger.info(f"未在配置中指定cache_dir，使用StorageManager定义的默认模型路径: {self.cache_dir}")
         
         self.quality_checker = QualityChecker()
         self._encoders: Dict[str, BaseEncoder] = {}
