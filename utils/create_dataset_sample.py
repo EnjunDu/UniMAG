@@ -6,17 +6,22 @@ import argparse
 import logging
 from pathlib import Path
 from tqdm import tqdm
+from typing import Optional
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def find_image_file(image_dir: Path, node_id: str) -> Optional[Path]:
-    """根据节点ID在目录中查找对应的图像文件（忽略扩展名）"""
-    # 使用glob查找所有可能匹配的文件
-    matched_files = list(image_dir.glob(f"{node_id}.*"))
+    """
+    根据节点ID在目录中递归查找对应的图像文件（忽略扩展名）。
+    使用rglob进行递归搜索。
+    """
+    # 使用rglob进行递归搜索，查找所有子目录
+    matched_files = list(image_dir.rglob(f"{node_id}.*"))
     for file in matched_files:
-        if file.suffix.lower() in ['.jpg', '.jpeg', '.png', '.bmp', '.gif']:
+        # 确保我们找到的是文件而不是目录
+        if file.is_file() and file.suffix.lower() in ['.jpg', '.jpeg', '.png', '.bmp', '.gif']:
             return file
     return None
 
@@ -42,8 +47,13 @@ def create_sample_dataset(
     output_dir = Path(base_path) / output_dataset_name
     
     source_text_file = source_dir / f"{source_dataset_name}-raw-text.jsonl"
-    source_image_dir_name = f"{source_dataset_name}-images_extracted"
-    source_image_dir = source_dir / source_image_dir_name
+    # 修正路径以处理额外的嵌套目录
+    source_image_dir = source_dir / f"{source_dataset_name}-images_extracted" / f"{source_dataset_name}-images"
+    
+    # 如果修正后的路径不存在，则回退到旧路径以保持兼容性
+    if not source_image_dir.exists():
+        logger.warning(f"在期望路径 '{source_image_dir}' 未找到图像目录，将尝试备用路径。")
+        source_image_dir = source_dir / f"{source_dataset_name}-images_extracted"
 
     if not source_dir.exists() or not source_text_file.exists():
         logger.error(f"源数据集路径或文件不存在: {source_dir} / {source_text_file}")
