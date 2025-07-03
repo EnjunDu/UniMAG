@@ -3,6 +3,7 @@
 .roocode
 .kilocode
 hugging_face
+huggingface
 UniMAG_Action_Plan.md
 test_embedding_system.py
 **/__pycache__

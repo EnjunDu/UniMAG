@@ -6,6 +6,9 @@ pipeline_settings:
 
 # 2. 编码器设置
 encoder_settings:
+  # 编码器类型，用于工厂创建正确的编码器实例
+  encoder_type: "qwen_vl"
+  
   # 使用的编码器模型 (Hugging Face 模型名称)
   model_name: "Qwen/Qwen2.5-VL-3B-Instruct"
   
@@ -19,7 +22,7 @@ encoder_settings:
   target_dimensions:
     text: 768
     image: 768
-    # multimodal: 768 # 如果需要, 也可以为多模态指定维度
+    multimodal: 768
 
 # 3. 数据集处理设置
 dataset_settings:
@@ -29,6 +32,6 @@ dataset_settings:
   
   # 要为这些数据集处理的模态列表
   modalities_to_process:
-    # - "text"
-    # - "image"
+    - "text"
+    - "image"
     - "multimodal"

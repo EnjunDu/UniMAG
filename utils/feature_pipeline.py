@@ -25,7 +25,7 @@ import embedding_converter # 导入包以触发所有编码器的注册
 
 from utils.storage_manager import StorageManager
 from embedding_converter.quality_checker import QualityChecker
-from utils.config_loader import load_embedding_config
+from embedding_converter.config_loader import load_embedding_config
 from utils.convert_magb_text_and_image_to_mmgraph import convert_csv_to_jsonl
 
 # 配置日志

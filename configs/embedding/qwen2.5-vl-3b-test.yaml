@@ -1,11 +1,14 @@
 # 1. 管道运行设置
 pipeline_settings:
   environment: "server"      # 运行环境: "local" 或 "server"，前者在本地运行，后者在服务器运行
-  force_reprocess: false    # 是否强制重新处理已存在的特征文件
+  force_reprocess: true    # 是否强制重新处理已存在的特征文件
   batch_size: 8             # 编码时使用的批处理大小
 
 # 2. 编码器设置
 encoder_settings:
+  # 编码器类型，用于工厂创建正确的编码器实例
+  encoder_type: "qwen_vl"
+  
   # 使用的编码器模型 (Hugging Face 模型名称)
   model_name: "Qwen/Qwen2.5-VL-3B-Instruct"
   
