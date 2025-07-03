@@ -117,10 +117,19 @@ class FeaturePipeline:
         return image_path_map
 
     def _load_image_data_by_id(self, dataset_path: Path) -> Dict[str, Path]:
-        image_tar_files = list(dataset_path.glob("*images.tar*"))
+        image_tar_files = (
+            list(dataset_path.glob("*-images.tar")) +
+            list(dataset_path.glob("*Images.tar.gz"))
+        )
+        
         if image_tar_files:
             tar_file = image_tar_files[0]
-            extract_dir = dataset_path / f"{tar_file.stem}_extracted"
+            
+            if tar_file.name.endswith(".tar.gz"):
+                dir_name = tar_file.name[:-len(".tar.gz")]
+            else:
+                dir_name = tar_file.stem
+            extract_dir = dataset_path / f"{dir_name}_extracted"
             logger.info(f"找到TAR压缩包: {tar_file}, 将在 {extract_dir} 中寻找/解压图像。")
             if not extract_dir.exists():
                 logger.info(f"提取图像从 {tar_file} 到 {extract_dir}")

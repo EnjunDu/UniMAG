@@ -19,7 +19,7 @@ from utils.embedding_manager import EmbeddingManager
 manager = EmbeddingManager()
 
 # Or, initialize with a custom base path
-local_manager = EmbeddingManager(base_path="/home/ai/ylzuo/UniMAG")
+local_manager = EmbeddingManager(base_path="/home/ai/ylzuo/UniMAG/hugging_face")
 ```
 
 **Constructor Parameters:**
