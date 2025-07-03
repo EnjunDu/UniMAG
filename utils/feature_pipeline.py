@@ -24,7 +24,7 @@ from PIL import Image
 from utils.storage_manager import StorageManager
 from embedding_converter import EncoderFactory, ModalityType, EncoderConfig, QualityChecker
 from embedding_converter.config_loader import load_embedding_config
-from .convert_magb_to_mmgraph import convert_csv_to_jsonl
+from utils.convert_magb_text_and_image_to_mmgraph import convert_csv_to_jsonl
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

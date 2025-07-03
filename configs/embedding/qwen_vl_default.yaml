@@ -1,6 +1,6 @@
 # 1. 管道运行设置
 pipeline_settings:
-  environment: "local"      # 运行环境: "local" 或 "server"
+  environment: "server"      # 运行环境: "local" 或 "server"，前者在本地运行，后者在服务器运行
   force_reprocess: false    # 是否强制重新处理已存在的特征文件
   batch_size: 8             # 编码时使用的批处理大小
 
@@ -29,5 +29,6 @@ dataset_settings:
   
   # 要为这些数据集处理的模态列表
   modalities_to_process:
-    - "text"
+    # - "text"
     - "image"
+    - "multimodal"
