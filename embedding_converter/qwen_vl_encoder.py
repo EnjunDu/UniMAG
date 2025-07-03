@@ -37,12 +37,12 @@ class QwenVLEncoder(BaseEncoder):
     Qwen2.5-VL多模态编码器实现
     """
     
-    def __init__(self, 
+    def __init__(self,
                  model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct",
                  cache_dir: Optional[str] = None,
                  device: Optional[str] = None,
                  torch_dtype: str = "auto",
-                 attn_implementation: str = "flash_attention_2",
+                 attn_implementation: str = "sdpa",
                  **kwargs):
         self.torch_dtype = torch_dtype
         self.attn_implementation = attn_implementation
@@ -67,8 +67,13 @@ class QwenVLEncoder(BaseEncoder):
                 logger.info("在CUDA设备上，自动设置torch_dtype=torch.float16以启用FlashAttention")
                 model_kwargs["torch_dtype"] = torch.float16
             
+            # 对于Qwen2.5-VL，使用兼容的注意力实现
             if self.attn_implementation and self.device == "cuda":
-                model_kwargs["attn_implementation"] = self.attn_implementation
+                if self.attn_implementation == "flash_attention_2":
+                    logger.warning("检测到flash_attention_2，由于兼容性问题，自动切换到sdpa")
+                    model_kwargs["attn_implementation"] = "sdpa"
+                else:
+                    model_kwargs["attn_implementation"] = self.attn_implementation
             
             self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 self.model_name, **model_kwargs

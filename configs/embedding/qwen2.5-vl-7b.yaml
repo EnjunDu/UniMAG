@@ -29,6 +29,6 @@ dataset_settings:
   
   # 要为这些数据集处理的模态列表
   modalities_to_process:
-    # - "text"
+    - "text"
     - "image"
     - "multimodal"
