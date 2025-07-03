@@ -79,9 +79,13 @@ class QwenVLEncoder(BaseEncoder):
                 "trust_remote_code": True
             }
             
-            # 设置数据类型
+            # 设置数据类型，优先使用指定的dtype，否则根据设备推荐
             if self.torch_dtype != "auto":
                 model_kwargs["torch_dtype"] = getattr(torch, self.torch_dtype)
+            elif self.device == "cuda":
+                # 对于CUDA设备，使用float16以启用FlashAttention
+                logger.info("在CUDA设备上，自动设置torch_dtype=torch.float16以启用FlashAttention")
+                model_kwargs["torch_dtype"] = torch.float16
             
             # 设置注意力实现
             if self.attn_implementation and self.device == "cuda":
@@ -122,10 +126,12 @@ class QwenVLEncoder(BaseEncoder):
         Returns:
             提取的特征向量 [batch_size, hidden_dim]
         """
-        # 使用注意力掩码进行平均池化
-        mask_expanded = attention_mask.unsqueeze(-1).expand(hidden_states.size())
-        masked_embeddings = hidden_states * mask_expanded
-        sum_embeddings = masked_embeddings.sum(dim=1)
+       # 确保掩码和隐层状态在同一个设备上
+       mask_expanded = attention_mask.unsqueeze(-1).expand(hidden_states.size()).to(hidden_states.device)
+       
+       # 使用注意力掩码进行平均池化
+       masked_embeddings = hidden_states * mask_expanded
+       sum_embeddings = masked_embeddings.sum(dim=1)
         sum_mask = mask_expanded.sum(dim=1)
         
         # 避免除零
@@ -145,53 +151,44 @@ class QwenVLEncoder(BaseEncoder):
         """
         if not texts:
             return np.empty((0, self.get_native_embedding_dim()))
+
+        # 处理包含空字符串（缺失值）的情况
+        final_embeddings = np.zeros((len(texts), self.get_native_embedding_dim()), dtype=np.float32)
         
+        non_empty_texts = []
+        non_empty_indices = []
+        for i, text in enumerate(texts):
+            if text and text.strip():
+                non_empty_texts.append(text)
+                non_empty_indices.append(i)
+
+        if not non_empty_texts:
+            return final_embeddings
+
         batch_size = kwargs.get('batch_size', 8)
         all_embeddings = []
         
         with torch.no_grad():
-            for i in tqdm(range(0, len(texts), batch_size), desc="编码文本"):
-                batch_texts = texts[i:i + batch_size]
+            for i in tqdm(range(0, len(non_empty_texts), batch_size), desc="编码文本"):
+                batch_texts = non_empty_texts[i:i + batch_size]
                 
-                # 构建消息格式
-                messages_batch = []
-                for text in batch_texts:
-                    messages_batch.append([{
-                        "role": "user",
-                        "content": [{"type": "text", "text": text}]
-                    }])
+                messages_batch = [[{"role": "user", "content": [{"type": "text", "text": text}]}] for text in batch_texts]
                 
-                # 应用对话模板
-                texts_formatted = [
-                    self.processor.apply_chat_template(
-                        msgs, tokenize=False, add_generation_prompt=False
-                    ) for msgs in messages_batch
-                ]
+                texts_formatted = [self.processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False) for msgs in messages_batch]
                 
-                # 处理视觉信息（纯文本时为空）
-                image_inputs, video_inputs = process_vision_info(messages_batch)
+                inputs = self.processor(text=texts_formatted, padding=True, return_tensors="pt").to(self.device)
                 
-                # 编码
-                inputs = self.processor(
-                    text=texts_formatted,
-                    images=image_inputs,
-                    videos=video_inputs,
-                    padding=True,
-                    return_tensors="pt"
-                )
-                inputs = inputs.to(self.device)
+                text_model = self.model.model
+                outputs = text_model(input_ids=inputs['input_ids'], attention_mask=inputs['attention_mask'], output_hidden_states=True)
+                hidden_states = outputs.hidden_states[-1]
                 
-                # 前向传播获取隐层状态
-                outputs = self.model(**inputs, output_hidden_states=True)
-                hidden_states = outputs.hidden_states[-1]  # 最后一层
+                batch_embeddings = self._extract_embeddings_from_hidden_states(hidden_states, inputs.attention_mask)
                 
-                # 提取嵌入
-                embeddings = self._extract_embeddings_from_hidden_states(
-                    hidden_states, inputs.attention_mask
-                )
-                all_embeddings.append(embeddings)
-        
-        return np.concatenate(all_embeddings, axis=0)
+                # 将计算出的嵌入向量放回其在完整列表中的原始位置
+                original_indices = non_empty_indices[i:i + batch_size]
+                final_embeddings[original_indices, :] = batch_embeddings
+
+        return final_embeddings
     
     def encode_image(self, image_paths: List[str], **kwargs) -> np.ndarray:
         """
@@ -205,56 +202,42 @@ class QwenVLEncoder(BaseEncoder):
         """
         if not image_paths:
             return np.empty((0, self.get_native_embedding_dim()))
+
+        final_embeddings = np.zeros((len(image_paths), self.get_native_embedding_dim()), dtype=np.float32)
         
+        non_empty_paths = []
+        non_empty_indices = []
+        for i, path in enumerate(image_paths):
+            if path and Path(path).exists():
+                non_empty_paths.append(path)
+                non_empty_indices.append(i)
+
+        if not non_empty_paths:
+            return final_embeddings
+
         batch_size = kwargs.get('batch_size', 4)  # 图像批次小一些
         all_embeddings = []
         
         with torch.no_grad():
-            for i in tqdm(range(0, len(image_paths), batch_size), desc="编码图像"):
-                batch_paths = image_paths[i:i + batch_size]
+            for i in tqdm(range(0, len(non_empty_paths), batch_size), desc="编码图像"):
+                batch_paths = non_empty_paths[i:i + batch_size]
                 
-                # 构建消息格式
-                messages_batch = []
-                for path in batch_paths:
-                    messages_batch.append([{
-                        "role": "user", 
-                        "content": [
-                            {"type": "image", "image": f"file://{path}"},
-                            {"type": "text", "text": "描述这张图片"}
-                        ]
-                    }])
+                messages_batch = [[{"role": "user", "content": [{"type": "image", "image": f"file://{path}"}, {"type": "text", "text": "描述这张图片"}]}] for path in batch_paths]
                 
-                # 应用对话模板
-                texts_formatted = [
-                    self.processor.apply_chat_template(
-                        msgs, tokenize=False, add_generation_prompt=False
-                    ) for msgs in messages_batch
-                ]
+                texts_formatted = [self.processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False) for msgs in messages_batch]
+                image_inputs, _ = process_vision_info(messages_batch)
                 
-                # 处理视觉信息
-                image_inputs, video_inputs = process_vision_info(messages_batch)
+                inputs = self.processor(text=texts_formatted, images=image_inputs, padding=True, return_tensors="pt").to(self.device)
                 
-                # 编码
-                inputs = self.processor(
-                    text=texts_formatted,
-                    images=image_inputs,
-                    videos=video_inputs,
-                    padding=True,
-                    return_tensors="pt"
-                )
-                inputs = inputs.to(self.device)
-                
-                # 前向传播获取隐层状态
                 outputs = self.model(**inputs, output_hidden_states=True)
                 hidden_states = outputs.hidden_states[-1]
                 
-                # 提取嵌入
-                embeddings = self._extract_embeddings_from_hidden_states(
-                    hidden_states, inputs.attention_mask
-                )
-                all_embeddings.append(embeddings)
-        
-        return np.concatenate(all_embeddings, axis=0)
+                batch_embeddings = self._extract_embeddings_from_hidden_states(hidden_states, inputs.attention_mask)
+                
+                original_indices = non_empty_indices[i:i + batch_size]
+                final_embeddings[original_indices, :] = batch_embeddings
+
+        return final_embeddings
     
     def encode_multimodal(self, 
                          texts: List[str], 
