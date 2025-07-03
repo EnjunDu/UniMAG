@@ -57,18 +57,26 @@ class QwenVLEncoder(BaseEncoder):
             
             model_kwargs = {
                 "cache_dir": self.cache_dir,
-                "device_map": "auto" if self.device == "cuda" else None,
                 "trust_remote_code": True
             }
+
+            # 只有当device是"cuda"（通用）时，才使用device_map="auto"进行多GPU自动分配
+            if self.device == "cuda":
+                model_kwargs["device_map"] = "auto"
+            # 如果指定了具体的cuda设备（如"cuda:0"），则不使用device_map，后续会用.to()移动
+            elif self.device and self.device.startswith("cuda"):
+                model_kwargs["device_map"] = None
+            else: # CPU或其他情况
+                model_kwargs["device_map"] = None
             
             if self.torch_dtype != "auto":
                 model_kwargs["torch_dtype"] = getattr(torch, self.torch_dtype)
-            elif self.device == "cuda":
+            elif self.device and self.device.startswith("cuda"):
                 logger.info("在CUDA设备上，自动设置torch_dtype=torch.float16以启用FlashAttention")
                 model_kwargs["torch_dtype"] = torch.float16
             
             # 对于Qwen2.5-VL，使用兼容的注意力实现
-            if self.attn_implementation and self.device == "cuda":
+            if self.attn_implementation and self.device and self.device.startswith("cuda"):
                 if self.attn_implementation == "flash_attention_2":
                     logger.warning("检测到flash_attention_2，由于兼容性问题，自动切换到sdpa")
                     model_kwargs["attn_implementation"] = "sdpa"
@@ -79,7 +87,8 @@ class QwenVLEncoder(BaseEncoder):
                 self.model_name, **model_kwargs
             )
             
-            if self.device and (self.device != "cuda" or "device_map" not in model_kwargs):
+            # 如果没有使用device_map（例如指定了单个GPU或CPU），则手动将模型移动到设备
+            if self.device and "device_map" not in model_kwargs or model_kwargs.get("device_map") is None:
                 self.model = self.model.to(self.device)
             
             self.model.eval()
@@ -204,8 +213,8 @@ class QwenVLEncoder(BaseEncoder):
         
         with torch.no_grad():
             for i in tqdm(range(0, len(valid_texts), batch_size), desc="编码多模态"):
-                batch_texts = valid_texts[i:i + len(valid_texts)]
-                batch_paths = valid_image_paths[i:i + len(valid_texts)]
+                batch_texts = valid_texts[i:i + batch_size]
+                batch_paths = valid_image_paths[i:i + batch_size]
                 
                 messages_batch = []
                 for text, path in zip(batch_texts, batch_paths):

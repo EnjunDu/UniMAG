@@ -71,6 +71,14 @@ class FeaturePipeline:
         self.modalities_to_process = dataset_cfg.get("modalities_to_process", ["text", "image"])
         
         self.storage_manager = StorageManager(self.environment)
+        
+        # 优先从配置中获取cache_dir，如果未提供，则从storage_manager获取默认值
+        self.cache_dir = encoder_cfg.get("cache_dir")
+        if not self.cache_dir:
+            if hasattr(self.storage_manager, 'model_path') and self.storage_manager.model_path:
+                self.cache_dir = self.storage_manager.model_path
+                logger.info(f"未在配置中指定cache_dir，使用StorageManager定义的默认模型路径: {self.cache_dir}")
+        
         self.quality_checker = QualityChecker()
         self._encoders = {}
     
