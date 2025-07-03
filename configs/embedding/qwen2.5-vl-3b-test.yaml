@@ -1,8 +1,7 @@
 # 1. 管道运行设置
 pipeline_settings:
-  environment: "server"      # 运行环境: "local" 或 "server"，前者在本地运行，后者在服务器运行
   force_reprocess: true    # 是否强制重新处理已存在的特征文件
-  batch_size: 8             # 编码时使用的批处理大小
+  batch_size: 64             # 编码时使用的批处理大小
 
 # 2. 编码器设置
 encoder_settings:
@@ -26,12 +25,16 @@ encoder_settings:
 
 # 3. 数据集处理设置
 dataset_settings:
+  # 数据集根路径 (可选, 留空则使用服务器的默认路径 /home/ai/MMAG)
+  # dataset_root_path: "/home/ai/ylzuo/UniMAG/hugging_face"
+  
   # 要处理的数据集列表 (可选, 留空或省略则处理hugging_face/下的所有数据集)
   datasets_to_process:
-    - "books-nc-50"
+    # - "books-nc-50"
+    - "Grocery"
   
   # 要为这些数据集处理的模态列表
   modalities_to_process:
-    - "text"
+    # - "text"
     - "image"
-    - "multimodal"
+    # - "multimodal"

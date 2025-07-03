@@ -2,8 +2,8 @@ import numpy as np
 import logging
 from typing import List
 
-from .encoder_factory import EncoderFactory
-from .base_encoder import BaseEncoder
+from ..encoder_factory import EncoderFactory
+from ..base_encoder import BaseEncoder
 
 logger = logging.getLogger(__name__)
 
