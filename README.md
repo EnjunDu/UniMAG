@@ -1,7 +1,7 @@
 # UniMAG
 **MultiModal Attribute Graph Pipelines**
 
-The datasets are given in huggingface [https://huggingface.co/datasets/enjun-collab/MMAGs](https://huggingface.co/datasets/enjun-collab/MMAG) .
+The datasets are given in huggingface [https://huggingface.co/datasets/enjun-collab/MMAG](https://huggingface.co/datasets/enjun-collab/MMAG) .
 
 
 
