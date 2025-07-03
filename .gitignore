@@ -4,9 +4,11 @@
 .kilocode
 hugging_face
 huggingface
-UniMAG_Action_Plan.md
+docs
+test_embedding_manager.py
 test_embedding_system.py
 **/__pycache__
 MAGB
+MMAG
 mm-graph-benchmark
 .DS_Store
