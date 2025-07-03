@@ -1,7 +1,7 @@
 # 1. 管道运行设置
 pipeline_settings:
   force_reprocess: false    # 是否强制重新处理已存在的特征文件
-  batch_size: 96             # 编码时使用的批处理大小
+  batch_size: 64             # 编码时使用的批处理大小
 
 # 2. 编码器设置
 encoder_settings:

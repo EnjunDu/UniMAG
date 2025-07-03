@@ -1,7 +1,7 @@
 # 1. 管道运行设置
 pipeline_settings:
-  force_reprocess: true    # 是否强制重新处理已存在的特征文件
-  batch_size: 32             # 编码时使用的批处理大小
+  force_reprocess: false    # 是否强制重新处理已存在的特征文件
+  batch_size: 28             # 编码时使用的批处理大小
 
 # 2. 编码器设置
 encoder_settings:
@@ -21,7 +21,7 @@ encoder_settings:
   target_dimensions:
     text: 768
     image: 768
-    multimodal: 768 # 如果需要, 也可以为多模态指定维度
+    multimodal: 768
 
 # 3. 数据集处理设置
 dataset_settings:
@@ -30,12 +30,8 @@ dataset_settings:
   
   # 要处理的数据集列表 (可选, 留空或省略则处理hugging_face/下的所有数据集)
   datasets_to_process:
-    # - "books-nc-50"
-    # - "Grocery"
-    
+    - "Grocery"
   
   # 要为这些数据集处理的模态列表
   modalities_to_process:
-    - "text"
-    - "image"
     - "multimodal"
