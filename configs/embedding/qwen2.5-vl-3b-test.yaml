@@ -25,6 +25,9 @@ encoder_settings:
 
 # 3. 数据集处理设置
 dataset_settings:
+  # 数据集根路径 (可选, 留空则使用服务器的默认路径 /home/ai/MMAG)
+  dataset_root_path: "/home/ai/ylzuo/UniMAG/hugging_face"
+  
   # 要处理的数据集列表 (可选, 留空或省略则处理hugging_face/下的所有数据集)
   datasets_to_process:
     - "books-nc-50"

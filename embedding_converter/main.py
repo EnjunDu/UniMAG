@@ -58,12 +58,12 @@ class FeaturePipeline:
         self.encoder_model = encoder_cfg.get("model_name")
         self.device = encoder_cfg.get("device")
         self.target_dimensions = encoder_cfg.get("target_dimensions", {})
-        self.encoder_config = encoder_cfg.get("encoder_config", {})
         
+        self.dataset_root_path = dataset_cfg.get("dataset_root_path")
         self.datasets_to_process = dataset_cfg.get("datasets_to_process")
         self.modalities_to_process = dataset_cfg.get("modalities_to_process", ["text", "image"])
         
-        self.storage_manager = StorageManager()
+        self.storage_manager = StorageManager(self.dataset_root_path)
         
         self.cache_dir = encoder_cfg.get("cache_dir")
         
@@ -91,7 +91,6 @@ class FeaturePipeline:
                 'model_name': self.encoder_model,
                 'cache_dir': self.cache_dir,
                 'device': self.device,
-                **self.encoder_config,
                 **constructor_kwargs
             }
             self._encoders[instance_key] = EncoderFactory.create_encoder(name=encoder_name_to_create, **full_kwargs)
