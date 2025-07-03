@@ -1,0 +1,9 @@
+defaults:
+  - task: nc
+  - model: gcn
+  - dataset: default
+  - _self_
+  
+seed: 42
+log_dir: outputs/
+device: cuda

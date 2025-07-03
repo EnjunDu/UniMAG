@@ -149,6 +149,7 @@ A **toy product graph** for node‐classification and link‐prediction: classif
 * `Toys.csv`: CSV of `{ id, title, description }` for each toy.  
 * `ToysImages.tar.gz`: Compressed raw toy images.  
 * `ToysGraph.pt`: DGLGraph object containing adjacency and feature placeholders.
+<<<<<<< HEAD
 
 
 
@@ -300,4 +301,3 @@ A **toy product graph** for node‐classification and link‐prediction: classif
   - GT2Image: Image editing or reconstruction
   - GT2Text: Story generation
   - G2TextImage: Multimodal response generation
-
