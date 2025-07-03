@@ -7,9 +7,9 @@ import logging
 from tqdm import tqdm
 from pathlib import Path
 
-from .base_encoder import BaseEncoder, ModalityType
-from .dimension_reducer import DimensionReducer
-from .encoder_factory import EncoderFactory
+from ..base_encoder import BaseEncoder
+from ..utils.dimension_reducer import DimensionReducer
+from ..encoder_factory import EncoderFactory
 
 logger = logging.getLogger(__name__)
 

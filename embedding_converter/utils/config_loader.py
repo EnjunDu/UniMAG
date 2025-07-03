@@ -88,7 +88,8 @@ if __name__ == '__main__':
     # 测试配置加载器
     # 假设项目根目录下有 configs/embedding/qwen2.5-vl-3b.yaml
     try:
-        default_config_path = Path(__file__).parent.parent / "configs" / "embedding" / "qwen2.5-vl-3b.yaml"
+        # 修正路径以适应新的文件位置
+        default_config_path = Path(__file__).parent.parent.parent / "configs" / "embedding" / "qwen2.5-vl-3b.yaml"
         config_data = load_embedding_config(default_config_path)
         
         print("配置加载和验证成功！")
