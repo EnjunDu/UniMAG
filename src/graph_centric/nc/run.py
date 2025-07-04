@@ -2,7 +2,7 @@ import dgl
 import torch
 from torch_geometric.data import Data
 import numpy as np
-from models import GCN, GraphSAGE, GAT
+from ..models import GCN, GraphSAGE, GAT
 import torch.nn as nn
 import torch.optim as optim
 def split_graph(nodes_num, train_ratio=0.6, val_ratio=0.2, fewshots=False, label=None):

@@ -2,7 +2,7 @@ import dgl
 import torch
 from torch_geometric.data import Data
 import numpy as np
-from models import GCN, GraphSAGE, GAT
+from ..models import GCN, GraphSAGE, GAT
 import torch.nn as nn
 import torch.optim as optim
 from torch_sparse import SparseTensor
