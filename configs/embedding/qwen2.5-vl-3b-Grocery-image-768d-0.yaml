@@ -1,7 +1,7 @@
 # 1. 管道运行设置
 pipeline_settings:
   force_reprocess: false
-  batch_size: 24
+  batch_size: 8
 
 # 2. 编码器设置
 encoder_settings:
