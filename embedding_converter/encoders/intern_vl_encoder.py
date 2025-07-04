@@ -77,7 +77,8 @@ class InternVL3Encoder(BaseEncoder):
         return mean_embeddings.detach().cpu().numpy()
     
     def encode_text(self, texts: List[str], **kwargs) -> np.ndarray:
-        native_dim = self.get_native_embedding_dim()
+        # 修复: 直接从模型配置获取真实的原生维度，避免被子类重写的方法影响
+        native_dim = self.model.config.text_config.hidden_size
         if not texts: return np.empty((0, native_dim), dtype=np.float32)
         final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float32)
         
@@ -101,7 +102,8 @@ class InternVL3Encoder(BaseEncoder):
         return final_embeddings
     
     def encode_image(self, image_paths: List[str], **kwargs) -> np.ndarray:
-        native_dim = self.get_native_embedding_dim()
+        # 修复: 直接从模型配置获取真实的原生维度
+        native_dim = self.model.config.text_config.hidden_size
         if not image_paths: return np.empty((0, native_dim), dtype=np.float32)
         final_embeddings = np.zeros((len(image_paths), native_dim), dtype=np.float32)
 
@@ -132,7 +134,8 @@ class InternVL3Encoder(BaseEncoder):
         return final_embeddings
 
     def encode_multimodal(self, texts: List[str], image_paths: List[str], **kwargs) -> np.ndarray:
-        native_dim = self.get_native_embedding_dim()
+        # 修复: 直接从模型配置获取真实的原生维度
+        native_dim = self.model.config.text_config.hidden_size
         if len(texts) != len(image_paths): raise ValueError("文本和图像列表的长度必须相等")
         if not texts: return np.empty((0, native_dim), dtype=np.float32)
         final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float32)
