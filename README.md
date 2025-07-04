@@ -91,7 +91,48 @@ The datasets are given in huggingface [https://huggingface.co/datasets/enjun-col
   - Traditional: Fine-grained modality matching focusing on matching degree (detailed descriptions)
   - MAG-specific: Given any image-text pair from a MAG node, return fine-grained alignment details based on embeddings
 
-  
+##### Task Arrangement
+
+The Quality Evaluation (QE) tasks are designed to assess the quality and alignment of multimodal embeddings. The implementation will reside in `src/multimodal_centric/qe/`.
+
+-   **Core References**:
+    -   **CLIP**: For baseline similarity metrics. [Radford, et al. (2021)](https://arxiv.org/abs/2103.00020).
+    -   **UniGraph2**: For leveraging graph structure in MAG-specific tasks. [He, Y., et al. (2025)](https://arxiv.org/abs/2502.00806).
+    -   **FG-CLIP**: For methodologies in fine-grained, region-based alignment. [Xie, C., et al. (2025)](https://arxiv.org/abs/2505.05071).
+
+-   **Planned Project Architecture**:
+    ```
+    src/multimodal_centric/qe/
+    │
+    ├── README.md
+    ├── matching.py
+    ├── retrieval.py
+    ├── alignment.py
+    └── utils/
+    ```
+
+-   **Detailed Workflow**:
+
+    **1. Modality Matching (`matching.py`)**
+    | Approach | Input | Processing | Output |
+    | :--- | :--- | :--- | :--- |
+    | **Traditional** | An arbitrary image embedding and a text embedding. | Calculate the CLIP-score (typically `100 * cosine_similarity`) between the two embeddings. | A single matching score, reflecting context-free alignment. |
+    | **MAG-specific** | A `node_id` and a `dataset_name`. | 1. Use `embedding_manager` to fetch the target node's features and its neighbors' features. <br> 2. Use a GNN layer to create a neighborhood-enhanced image embedding and a neighborhood-enhanced text embedding. <br> 3. Calculate the CLIP-score between these two **enhanced** embeddings. | A single matching score, reflecting context-aware alignment. |
+
+    **2. Modality Retrieval (`retrieval.py`)**
+    | Approach | Input | Processing | Output |
+    | :--- | :--- | :--- | :--- |
+    | **Traditional** | A query embedding (image or text) and a pool of candidate embeddings. | 1. Calculate the cosine similarity between the query embedding and all candidate embeddings. <br> 2. Rank candidates based on similarity scores. | A ranked list of candidate IDs. |
+    | **MAG-specific** | A query `node_id` and a `dataset_name`. | 1. Fetch the query node's multimodal embedding. <br> 2. Use a GNN to aggregate features from the query node's 1-hop neighbors, creating a neighborhood-enhanced query embedding. <br> 3. Calculate similarity between the enhanced query embedding and all other node embeddings. | A ranked list of node IDs from the graph. |
+
+    **3. Modality Alignment (`alignment.py`)**
+    This task is divided into two stages:
+    -   **Stage 1: Data Preprocessing (Offline)**: Use external tools (SpaCy, Grounding DINO) to create a benchmark dataset of `(image, [(phrase, box), ...])` mappings.
+    -   **Stage 2: Evaluation (Online)**:
+        | Approach | Input | Processing | Output |
+        | :--- | :--- | :--- | :--- |
+        | **Traditional** | A benchmark entry: `(image, [(phrase, box), ...])`. | 1. Get image feature map from **our** image encoder. <br> 2. For each `(phrase, box)` pair, extract region embedding (via RoIAlign) and phrase embedding, then compute similarity. | A list of `(phrase, box, alignment_score)` tuples, reflecting baseline alignment quality. |
+        | **MAG-specific** | A `node_id` and its benchmark entry. | 1. Get the target node's feature map and its neighbors' feature maps. <br> 2. Use a GNN layer to create an **enhanced feature map**. <br> 3. Perform the same RoIAlign and similarity calculation on the **enhanced feature map**. | A list of `(phrase, box, alignment_score)` tuples, reflecting context-aware alignment quality. |
 
 
 
