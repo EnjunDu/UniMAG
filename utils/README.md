@@ -10,7 +10,9 @@ This module provides the `EmbeddingManager` class, an interface for accessing pr
 
 > [!IMPORTANT]
 > Embeddings in `/home/ai/MMAG` are currently being generated, so some dataset embedding files may be missing.
+> 
 > `text` & `image` embeddings should be ready for most datasets by 7/5.
+> 
 > `multimodal` embeddings are still being generated. The first one will be ready by 7/5 for `Grocery` dataset.
 
 ### Initialization
@@ -57,7 +59,7 @@ embedding = manager.get_embedding(
 | `dataset_name` | `str` | The name of the dataset (e.g., "books-nc"). |
 | `modality` | `str` | The feature modality. Can be "text", "image", or "multimodal". |
 | `encoder_name` | `str` | The full Hugging Face model identifier. This is used to distinguish between different models or versions. For now, it can be "Qwen/Qwen2.5-VL-3B-Instruct", "Qwen/Qwen2.5-VL-7B-Instruct". |
-| `dimension` | `int` | (Optional) The dimension of the feature vector. Can be 128, 256, 512, 768, 1024, 2048, ... (Maximum depends on the model). Leave it as `None` if you want to use the default dimension of the model. |
+| `dimension` | `int` | (Optional) The dimension of the feature vector. Can be 128, 256, 512, 768, 1024, 2048, ... (Maximum depends on the model). Leave it as `None` if you want to use the default dimension of the model. (**Note: for now, only `768` is supported**)|
 
 **Returns:**
 - A `numpy.ndarray` containing the feature vectors.
