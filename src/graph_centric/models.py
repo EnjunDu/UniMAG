@@ -16,6 +16,9 @@ class GCN(nn.Module):
         for _ in range(num_layers - 1):
             self.convs.append(GCNConv(hidden_dim, hidden_dim))
 
+    def reset_parameters(self):
+        for conv in self.convs:
+            conv.reset_parameters()
     def forward(self, x, edge_index):
         for i, conv in enumerate(self.convs):
             x = conv(x, edge_index)
@@ -36,6 +39,9 @@ class GraphSAGE(nn.Module):
         for _ in range(num_layers - 1):
             self.convs.append(SAGEConv(hidden_dim, hidden_dim))
 
+    def reset_parameters(self):
+        for conv in self.convs:
+            conv.reset_parameters()
     def forward(self, x, edge_index):
         for i, conv in enumerate(self.convs):
             x = conv(x, edge_index)
@@ -55,6 +61,9 @@ class GAT(nn.Module):
             self.convs.append(GATConv(hidden_dim * heads, hidden_dim, heads=heads, dropout=dropout))
         self.convs.append(GATConv(hidden_dim * heads, hidden_dim, heads=1, dropout=dropout))
     
+    def reset_parameters(self):
+        for conv in self.convs:
+            conv.reset_parameters()
     def forward(self, x, edge_index):
         for i, conv in enumerate(self.convs):
             x = conv(x, edge_index)

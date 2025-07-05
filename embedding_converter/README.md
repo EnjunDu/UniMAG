@@ -10,4 +10,4 @@ The logic within this module is focused on the **creation and management** of fe
 
 If your goal is to **use** these pre-computed embeddings in your own models or experiments, you do not need to interact with the code in this directory. Instead, please refer to the documentation for the `EmbeddingManager`, which provides a simple, high-level API for accessing all features.
 
-**> See: [Documentation for the `EmbeddingManager`](../utils/README.md)**
+> **See: [Documentation for the `EmbeddingManager`](../utils/README.md)**

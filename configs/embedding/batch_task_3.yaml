@@ -1,0 +1,20 @@
+# 1. 管道运行设置
+pipeline_settings:
+  force_reprocess: false
+  batch_size: 4
+
+# 2. 编码器设置
+encoder_settings:
+  encoder_type: "qwen_vl"
+  model_name: "Qwen/Qwen2.5-VL-3B-Instruct"
+  device: "cuda:1"
+  target_dimensions:
+    multimodal: 768
+
+# 3. 数据集处理设置
+dataset_settings:
+  # dataset_root_path: "/home/ai/ylzuo/UniMAG/hugging_face"
+  datasets_to_process:
+    - "books-nc"
+  modalities_to_process:
+    - "multimodal"
