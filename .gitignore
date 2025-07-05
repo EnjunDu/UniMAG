@@ -2,6 +2,7 @@
 .cursorindexingignore
 .roocode
 .kilocode
+Dataset_hugging_face
 hugging_face
 huggingface
 docs
