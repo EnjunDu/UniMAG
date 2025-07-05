@@ -114,41 +114,29 @@ class QwenVLEncoder(BaseEncoder):
     
     def encode_image(self, image_paths: List[str], **kwargs) -> np.ndarray:
         native_dim = self.model.config.hidden_size
-        if not image_paths: return np.empty((0, native_dim), dtype=np.float16)
+        if not image_paths: return np.empty((0, native_dim))
         final_embeddings = np.zeros((len(image_paths), native_dim), dtype=np.float16)
 
-        valid_paths, valid_indices = [], []
+        non_empty_paths, non_empty_indices = [], []
         for i, path in enumerate(image_paths):
             if path and str(path).strip() and Path(path).exists():
-                valid_paths.append(path)
-                valid_indices.append(i)
+                non_empty_paths.append(path)
+                non_empty_indices.append(i)
 
-        if not valid_paths: return final_embeddings
+        if not non_empty_paths: return final_embeddings
         batch_size = kwargs.get('batch_size', 4)
 
         with torch.no_grad():
-            for i in tqdm(range(0, len(valid_paths), batch_size), desc="编码图像 (Optimized)"):
-                batch_paths = valid_paths[i:i + batch_size]
-                try:
-                    images = [Image.open(path).convert("RGB") for path in batch_paths]
-                    inputs = self.processor(images=images, return_tensors="pt").to(self.model.device)
-                    
-                    vision_outputs = self.model.vision_tower(
-                        inputs.pixel_values,
-                        output_hidden_states=True
-                    )
-                    image_embeds = self.model.visual.forward(vision_outputs)
-
-                    batch_size, seq_len, _ = image_embeds.shape
-                    attention_mask = torch.ones((batch_size, seq_len), device=self.model.device)
-                    
-                    batch_embeddings = self._extract_embeddings_from_hidden_states(image_embeds, attention_mask)
-                    
-                    original_indices = [valid_indices[j] for j in range(i, i + len(batch_paths))]
-                    final_embeddings[original_indices, :] = batch_embeddings
-                except Exception as e:
-                    logger.error(f"处理图像批次时发生错误 (从索引 {i} 开始): {e}")
-                    continue
+            for i in tqdm(range(0, len(non_empty_paths), batch_size), desc="编码图像"):
+                batch_paths = non_empty_paths[i:i + batch_size]
+                messages_batch = [[{"role": "user", "content": [{"type": "image", "image": f"file://{path}"}, {"type": "text", "text": "Please describe the image in detail."}]}] for path in batch_paths]
+                texts_formatted = [self.processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False) for msgs in messages_batch]
+                image_inputs, _ = process_vision_info(messages_batch)
+                inputs = self.processor(text=texts_formatted, images=image_inputs, padding=True, return_tensors="pt").to(self.model.device)
+                outputs = self.model(**inputs, output_hidden_states=True)
+                batch_embeddings = self._extract_embeddings_from_hidden_states(outputs.hidden_states[-1], inputs.attention_mask)
+                original_indices = [non_empty_indices[j] for j in range(i, i + len(batch_paths))]
+                final_embeddings[original_indices, :] = batch_embeddings
         return final_embeddings
 
     def encode_multimodal(self, texts: List[str], image_paths: List[str], **kwargs) -> np.ndarray:
