@@ -101,7 +101,7 @@ class InternVL3Encoder(BaseEncoder):
         return final_embeddings
     
     def encode_image(self, image_paths: List[str], **kwargs) -> np.ndarray:
-        native_dim = self.get_native_embedding_dim()
+        native_dim = self.model.config.text_config.hidden_size
         if not image_paths: return np.empty((0, native_dim), dtype=np.float32)
         final_embeddings = np.zeros((len(image_paths), native_dim), dtype=np.float32)
 
@@ -115,19 +115,28 @@ class InternVL3Encoder(BaseEncoder):
         batch_size = kwargs.get('batch_size', 4)
 
         with torch.no_grad():
-            for i in tqdm(range(0, len(valid_paths), batch_size), desc="编码图像 (InternVL)"):
+            for i in tqdm(range(0, len(valid_paths), batch_size), desc="编码图像 (InternVL, Optimized)"):
                 batch_paths = valid_paths[i:i + batch_size]
                 try:
                     images = [Image.open(path).convert("RGB") for path in batch_paths]
-                    # 对于纯图像，我们仍然需要一个虚拟的文本输入
-                    dummy_text = " "
-                    inputs = self.processor(text=dummy_text, images=images, padding=True, return_tensors="pt").to(self.model.device)
-                    outputs = self.model(**inputs, output_hidden_states=True)
-                    batch_embeddings = self._extract_embeddings_from_hidden_states(outputs.hidden_states[-1], inputs.attention_mask)
+                    inputs = self.processor(images=images, return_tensors="pt").to(self.model.device)
+                    
+                    vision_outputs = self.model.vision_tower(
+                        inputs.pixel_values,
+                        output_hidden_states=True
+                    )
+                    image_features = vision_outputs.last_hidden_state
+                    image_embeds = self.model.projector(image_features)
+
+                    batch_size, seq_len, _ = image_embeds.shape
+                    attention_mask = torch.ones((batch_size, seq_len), device=self.model.device)
+                    
+                    batch_embeddings = self._extract_embeddings_from_hidden_states(image_embeds, attention_mask)
+                    
                     original_indices = [valid_indices[j] for j in range(i, i + len(batch_paths))]
                     final_embeddings[original_indices, :] = batch_embeddings
                 except Exception as e:
-                    logger.error(f"处理批次时发生错误 (从索引 {i} 开始): {e}")
+                    logger.error(f"处理图像批次时发生错误 (从索引 {i} 开始): {e}")
                     continue
         return final_embeddings
 

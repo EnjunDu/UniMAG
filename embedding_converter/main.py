@@ -212,7 +212,7 @@ class FeaturePipeline:
         results = {}
         text_data_map = self._load_text_data_by_id(dataset_path)
         image_data_map = self._load_image_data_by_id(dataset_path)
-        all_node_ids = sorted(list(set(text_data_map.keys()) | set(image_data_map.keys())), key=lambda x: int(x) if x.isdigit() else x)
+        all_node_ids = sorted(list(set(text_data_map.keys()) | set(image_data_map.keys())))
         if not all_node_ids:
             logger.warning(f"数据集 {dataset_name} 未找到任何文本或图像数据，跳过处理。")
             return {}
