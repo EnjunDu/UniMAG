@@ -2,11 +2,15 @@ import dgl
 import torch
 from torch_geometric.data import Data
 import numpy as np
+<<<<<<< HEAD:src/lp/run.py
 from model.models import GCN, GraphSAGE, GAT, MLP
 from model.MMGCN import Net
 from model.MGAT import MGAT
 from model.REVGAT import RevGAT
 import torch.nn.functional as F
+=======
+from ..models import GCN, GraphSAGE, GAT
+>>>>>>> 042f20051f01667404d349fd6059f04305061f92:src/graph_centric/lp/run.py
 import torch.nn as nn
 import torch.optim as optim
 from torch_sparse import SparseTensor
