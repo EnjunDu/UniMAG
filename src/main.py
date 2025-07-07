@@ -12,7 +12,7 @@ def main(cfg: DictConfig):
         from graph_centric.nc.run import run_nc
         run_nc(cfg)
     elif cfg.task.name == "lp":
-        from graph_centric.lp.run import run_lp
+        from graph_centric.lp.run_batch import run_lp
         run_lp(cfg)
 
 if __name__ == "__main__":

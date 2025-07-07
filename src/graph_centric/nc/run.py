@@ -2,14 +2,10 @@ import dgl
 import torch
 from torch_geometric.data import Data
 import numpy as np
-<<<<<<< HEAD:src/nc/run.py
 from model.models import GCN, GraphSAGE, GAT, MLP
 from model.MMGCN import Net
 from model.MGAT import MGAT
 from model.REVGAT import RevGAT
-=======
-from ..models import GCN, GraphSAGE, GAT
->>>>>>> 042f20051f01667404d349fd6059f04305061f92:src/graph_centric/nc/run.py
 import torch.nn as nn
 import torch.optim as optim
 from torch_geometric.loader import NeighborLoader

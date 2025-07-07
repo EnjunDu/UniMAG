@@ -2,15 +2,11 @@ import dgl
 import torch
 from torch_geometric.data import Data
 import numpy as np
-<<<<<<< HEAD:src/lp/run.py
 from model.models import GCN, GraphSAGE, GAT, MLP
 from model.MMGCN import Net
 from model.MGAT import MGAT
 from model.REVGAT import RevGAT
 import torch.nn.functional as F
-=======
-from ..models import GCN, GraphSAGE, GAT
->>>>>>> 042f20051f01667404d349fd6059f04305061f92:src/graph_centric/lp/run.py
 import torch.nn as nn
 import torch.optim as optim
 from torch_sparse import SparseTensor
@@ -280,6 +276,8 @@ def run_lp(config):
     predictor = LinkPredictor(in_channels=config.model.hidden_dim, hidden_channels=config.task.predictor_hidden, out_channels=1, num_layers=config.task.predictor_layers, dropout=config.task.predictor_dropout).to(config.device)
     # 3.训练 & 测试
     accs = []
+    best_mrr = 0
+    final_mrr_test = 0
     for run in range(config.task.n_runs):
         set_seed(config.seed + run)
         optimizer = torch.optim.Adam(list(encoder.parameters()) + list(predictor.parameters()), lr=config.task.lr)
@@ -293,11 +291,11 @@ def run_lp(config):
                 results = evaluate(encoder, predictor, data.x, data.adj_t, data.edge_split, config.dataset.num_neg, k_list=config.task.k_list)
                 print("[VAL]")
                 print(results)
+                if results["MRR"] > best_mrr:
+                    results = test(encoder, predictor, data.x, data.adj_t, data.edge_split, config.dataset.num_neg, k_list=config.task.k_list)
+                    final_mrr_test = results["MRR"]
+                    print(f"[TEST]")
+                    print(results)
 
-        # 测试
-        results = test(encoder, predictor, data.x, data.adj_t, data.edge_split, config.dataset.num_neg, k_list=config.task.k_list)
-        print(f"[TEST]")
-        print(results)
-        accs.append(results["MRR"])
-    
+        accs.append(final_mrr_test)
     print(f"Average MRR over {config.task.n_runs} runs: {np.mean(accs) * 100:.2f}")

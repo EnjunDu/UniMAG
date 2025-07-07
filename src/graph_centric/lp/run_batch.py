@@ -56,8 +56,8 @@ def load_data(graph_path, v_emb_path, t_emb_path, val_ratio=0.1, test_ratio=0.2,
     # 嵌入、标签
     v_x = torch.load(v_emb_path)
     t_x = torch.load(t_emb_path)
-    x = torch.cat([v_x, t_x], dim=1)
-    # x = v_x
+    # x = torch.cat([v_x, t_x], dim=1)
+    x = v_x
     # 划分数据集
     edge_split = split_edge(graph, val_ratio=val_ratio, test_ratio=test_ratio, num_neg=num_neg, path=path)
 
@@ -213,7 +213,6 @@ def train(model, predictor, data, adj_t, edge_split, optimizer, batch_size, num_
         edge_split['train']['source_node'],
         edge_split['train']['target_node']
     ], dim=0)
-    print(type(data))
     loader = LinkNeighborLoader(
         data=data,
         edge_label_index=train_edge_index,
@@ -230,7 +229,6 @@ def train(model, predictor, data, adj_t, edge_split, optimizer, batch_size, num_
         # 移动到设备（如果使用GPU）
         subgraph = subgraph.to("cuda")
         
-        # 仅计算子图嵌入 - 节省显存！
         emb = model(subgraph.x, subgraph.edge_index)
         
         # 获取当前批次的边（正负样本）
@@ -295,6 +293,8 @@ def run_lp(config):
     predictor = LinkPredictor(in_channels=config.model.hidden_dim, hidden_channels=config.task.predictor_hidden, out_channels=1, num_layers=config.task.predictor_layers, dropout=config.task.predictor_dropout).to(config.device)
     # 3.训练 & 测试
     accs = []
+    best_mrr = 0
+    final_mrr_test = 0
     for run in range(config.task.n_runs):
         set_seed(config.seed + run)
         optimizer = torch.optim.Adam(list(encoder.parameters()) + list(predictor.parameters()), lr=config.task.lr)
@@ -308,11 +308,12 @@ def run_lp(config):
                 results = evaluate(encoder, predictor, data.x, data.adj_t, data.edge_split, config.dataset.num_neg, k_list=config.task.k_list)
                 print("[VAL]")
                 print(results)
+                if results["MRR"] > best_mrr:
+                    results = test(encoder, predictor, data.x, data.adj_t, data.edge_split, config.dataset.num_neg, k_list=config.task.k_list)
+                    final_mrr_test = results["MRR"]
+                    print(f"[TEST]")
+                    print(results)
 
-        # 测试
-        results = test(encoder, predictor, data.x, data.adj_t, data.edge_split, config.dataset.num_neg, k_list=config.task.k_list)
-        print(f"[TEST]")
-        print(results)
-        accs.append(results["MRR"])
+        accs.append(final_mrr_test)
     
     print(f"Average MRR over {config.task.n_runs} runs: {np.mean(accs) * 100:.2f}")
