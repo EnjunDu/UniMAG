@@ -6,10 +6,10 @@ from model.models import GCN, GraphSAGE, GAT, MLP
 from model.MMGCN import Net
 from model.MGAT import MGAT
 from model.REVGAT import RevGAT
+import torch.nn.functional as F
 import torch.nn as nn
 import torch.optim as optim
 from torch_geometric.loader import NeighborLoader
-import torch.nn.functional as F
 def split_graph(nodes_num, train_ratio=0.6, val_ratio=0.2, fewshots=False, label=None):
     # 划分数据集
     indices = np.random.permutation(nodes_num)
@@ -20,11 +20,11 @@ def split_graph(nodes_num, train_ratio=0.6, val_ratio=0.2, fewshots=False, label
         train_mask = torch.zeros(nodes_num, dtype=torch.bool)
         val_mask = torch.zeros(nodes_num, dtype=torch.bool)
         test_mask = torch.zeros(nodes_num, dtype=torch.bool)
-
+        # indices = torch.Tensor(indices).to(torch.long)
+        indices = torch.from_numpy(indices).to(torch.long)
         train_mask[indices[:train_size]] = True
         val_mask[indices[train_size:train_size + val_size]] = True
         test_mask[indices[train_size + val_size:]] = True
-
     return train_mask, val_mask, test_mask
     
 def load_data(graph_path, v_emb_path, t_emb_path, train_ratio, val_ratio, fewshots=False, self_loop=True, undirected=True):
@@ -45,9 +45,9 @@ def load_data(graph_path, v_emb_path, t_emb_path, train_ratio, val_ratio, fewsho
     y = graph.ndata["label"]
     # 划分数据集
     if "train_mask" in graph.ndata:
-        train_mask = graph.ndata["train_mask"]
-        val_mask = graph.ndata["val_mask"]
-        test_mask = graph.ndata["test_mask"]
+        train_mask = graph.ndata["train_mask"].to(torch.bool)
+        val_mask = graph.ndata["val_mask"].to(torch.bool)
+        test_mask = graph.ndata["test_mask"].to(torch.bool)
     else:
         train_mask, val_mask, test_mask = split_graph(graph.num_nodes(), train_ratio, val_ratio, fewshots, y)
     return Data(x=x, v_dim=v_x.size(1), t_dim=t_x.size(1), edge_index=edge_index, y=y, train_mask=train_mask, val_mask=val_mask, test_mask=test_mask)
@@ -86,7 +86,6 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-
 def calculate_f1(preds: torch.Tensor, labels: torch.Tensor, num_classes: int) -> float:
     """
     计算Macro-F1分数
@@ -129,15 +128,50 @@ def calculate_f1(preds: torch.Tensor, labels: torch.Tensor, num_classes: int) ->
     # Macro-F1 (各类别平均)
     macro_f1 = f1.mean().item()
     return macro_f1
-
 @torch.no_grad()
-def evaluate(model, data, mask, num_classes):
+def evaluate(model, data, mask, config, num_classes):
     model.eval()
-    out = model(data.x, data.edge_index)
-    pred = out.argmax(dim=1)
-    correct = (pred[mask] == data.y[mask]).sum()
-    f1 = calculate_f1(pred[mask], data.y[mask],  num_classes)
-    return f1, correct.item() / mask.sum().item() if mask.sum() > 0 else 0.0
+    
+    # 创建NeighborLoader进行子图采样
+    loader = NeighborLoader(
+        data,
+        num_neighbors=[config.task.num_neighbors] * config.model.num_layers,  # 每层采样邻居数
+        input_nodes=mask,  # 只对评估节点采样
+        batch_size=config.task.batch_size,
+        shuffle=False,
+        num_workers=4,
+    )
+    
+    correct = 0
+    total = 0
+    all_preds = []
+    all_labels = []
+    for batch in loader:  # 迭代子图
+        batch = batch.to(config.device)
+        out = model(batch.x, batch.edge_index)
+        pred = out.argmax(dim=1)
+        # correct += (pred[batch.train_mask] == batch.y[batch.train_mask]).sum().item()
+        # total += batch.train_mask.sum().item()
+        pred = pred[:batch.batch_size]
+        y_true = batch.y[:batch.batch_size]
+
+        all_preds.append(pred.cpu())
+        all_labels.append(y_true.cpu())
+
+        correct += (pred == y_true).sum().item()
+        total += y_true.size(0)
+
+    # 计算指标
+    accuracy = correct / total if total > 0 else 0.0
+    
+    # 计算F1分数
+
+    all_preds = torch.cat(all_preds)
+    all_labels = torch.cat(all_labels)
+    f1 = calculate_f1(all_preds, all_labels, num_classes)
+    
+
+    return f1, accuracy
 
 def train_and_eval(config, model, data, run_id=0):
     model.reset_parameters() if hasattr(model, 'reset_parameters') else None
@@ -147,22 +181,36 @@ def train_and_eval(config, model, data, run_id=0):
     optimizer = torch.optim.Adam(model.parameters(), lr=config.task.lr, weight_decay=config.task.weight_decay)
     criterion = torch.nn.CrossEntropyLoss()
 
+    # 创建NeighborLoader进行子图采样
+    train_loader = NeighborLoader(
+        data,
+        num_neighbors=[config.task.num_neighbors] * config.model.num_layers,  # 每层采样邻居数
+        input_nodes=data.train_mask,  # 只对训练节点采样
+        batch_size=config.task.batch_size,
+        shuffle=True,
+        num_workers=4,
+    )
     best_val_acc = 0
     best_val_f1 = 0
     final_test_acc = 0
     final_test_f1 = 0
-
     for epoch in range(config.task.n_epochs):
         model.train()
-        out = model(data.x, data.edge_index)
-        loss = criterion(out[data.train_mask], data.y[data.train_mask])
-        print(loss)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        total_loss = 0
+        for batch in train_loader:  # 迭代子图
+            batch = batch.to(config.device)
+            out = model(batch.x, batch.edge_index)
+            # 只计算子图中的训练节点损失
+            loss = criterion(out[batch.train_mask], batch.y[batch.train_mask])
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item() * batch.train_mask.sum().item()
 
-        val_f1, val_acc = evaluate(model, data, data.val_mask, data.y.max().item() + 1)
-        test_f1, test_acc = evaluate(model, data, data.test_mask, data.y.max().item() + 1)
+        loss = total_loss / len(train_loader)
+        print(loss)
+        val_f1, val_acc = evaluate(model, data, data.val_mask, config, data.y.max().item() + 1)
+        test_f1, test_acc = evaluate(model, data, data.test_mask, config, data.y.max().item() + 1)
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
@@ -177,6 +225,7 @@ def train_and_eval(config, model, data, run_id=0):
             print(f"[Run {run_id+1}] Epoch {epoch:03d} | Loss: {loss:.4f} | Val Acc: {val_acc:.4f} | Test Acc: {test_acc:.4f} | Val F1: {val_f1:.4f} | Test F1: {test_f1:.4f}")
 
     return best_val_acc, best_val_f1, final_test_acc, final_test_f1
+
 def run_nc(config):
     print(config)
     np.random.seed(config.seed)

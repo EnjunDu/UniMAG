@@ -1,6 +1,7 @@
 name: Movies
 graph_path: /home/ai/lys/MAG/temp/MoviesGraph.pt
-emb_path: /home/ai/lys/MAG/temp/MM_Movies_LLAMA8B_CLIP_feat.pt
+v_emb_path: /home/ai/lys/MAG/temp/MM_Movies_LLAMA8B_CLIP_feat.pt
+t_emb_path: /home/ai/lys/MAG/temp/MM_Movies_LLAMA8B_CLIP_feat.pt
 train_ratio: 0.6
 val_ratio: 0.2
 lp_val_ratio: 0.01

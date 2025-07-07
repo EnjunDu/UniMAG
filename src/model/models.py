@@ -4,6 +4,39 @@ import torch.nn.functional as F
 from torch import nn
 from torch_geometric.nn import GCNConv, SAGEConv, GATConv
 
+class MLP(nn.Module):
+    def __init__(self, in_dim, hidden_dim, num_layers, dropout):
+        super().__init__()
+        self.num_layers = num_layers
+
+        self.linears = nn.ModuleList()
+        self.norms = nn.ModuleList()
+
+        for i in range(num_layers):
+            input_dim = hidden_dim if i > 0 else in_dim
+            self.linears.append(nn.Linear(input_dim, hidden_dim))
+
+            if i < num_layers - 1:
+                self.norms.append(nn.BatchNorm1d(hidden_dim))
+
+        self.dropout = nn.Dropout(dropout)
+
+    def reset_parameters(self):
+        for linear in self.linears:
+            linear.reset_parameters()
+
+        for norm in self.norms:
+            norm.reset_parameters()
+
+    def forward(self, x, edge_index):
+        h = x
+
+        for i in range(self.num_layers - 1):
+            h = F.relu(self.norms[i](self.linears[i](h)))
+            h = self.dropout(h)
+
+        return self.linears[-1](h)
+
 class GCN(nn.Module):
     def __init__(self, in_dim, hidden_dim, num_layers, dropout):
         super(GCN, self).__init__()

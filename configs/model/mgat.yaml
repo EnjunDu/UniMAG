@@ -1,0 +1,4 @@
+name: MGAT
+hidden_dim: 128
+num_layers: 1
+

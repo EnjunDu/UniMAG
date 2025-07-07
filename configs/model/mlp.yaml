@@ -1,0 +1,4 @@
+name: MLP
+num_layers: 2
+hidden_dim: 128
+dropout: 0.5

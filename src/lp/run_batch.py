@@ -12,6 +12,7 @@ import torch.optim as optim
 from torch_sparse import SparseTensor
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch_geometric.loader import LinkNeighborLoader
 
 import os
 def split_edge(graph, val_ratio=0.2, test_ratio=0.2, num_neg=150, path=None):
@@ -68,7 +69,7 @@ def load_data(graph_path, v_emb_path, t_emb_path, val_ratio=0.1, test_ratio=0.2,
     adj_t = adj_t.to_symmetric()
     src, dst = graph.edges()
     edge_index = torch.stack([src, dst], dim=0)
-    return Data(x=x, v_dim=v_x.size(1), t_dim=t_x.size(1), edge_split=edge_split, adj_t=edge_index)
+    return Data(x=x, v_dim=v_x.size(1), t_dim=t_x.size(1), edge_split=edge_split, edge_index=edge_index, adj_t=adj_t)
 
 class LinkPredictor(nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, num_layers, dropout):
@@ -202,34 +203,52 @@ def test(model, predictor, x, adj_t, edge_split, num_neg=1000, k_list=[1,3,10], 
     mrr = (1.0 / ranks.float()).mean().item()
     
     return {**hits_results, 'MRR': mrr}
-def train(model, predictor, x, adj_t, edge_split, optimizer, batch_size):
+def train(model, predictor, data, adj_t, edge_split, optimizer, batch_size, num_neighbors):
 
     model.train()
     predictor.train()
 
-    source_edge = edge_split['train']['source_node']
-    target_edge = edge_split['train']['target_node']
 
+    train_edge_index = torch.stack([
+        edge_split['train']['source_node'],
+        edge_split['train']['target_node']
+    ], dim=0)
+    print(type(data))
+    loader = LinkNeighborLoader(
+        data=data,
+        edge_label_index=train_edge_index,
+        edge_label=torch.ones(train_edge_index.size(1)),  # 正样本标签
+        num_neighbors=[15,15],#num_neighbors,
+        batch_size=batch_size,
+        shuffle=True,
+        neg_sampling_ratio=1.0,  # 负样本比例 (1:1)
+    )
     total_loss = total_examples = 0
-    for batch in DataLoader(range(source_edge.size(0)), batch_size, shuffle=True):
+    for subgraph in loader:
         optimizer.zero_grad()
-        emb = model(x, adj_t)
-
-        pos_out = predictor(emb[source_edge[batch]], emb[target_edge[batch]])
-        pos_loss = -torch.log(pos_out + 1e-15).mean()
-
-        dst_neg = torch.randint(0, x.size(0), source_edge[batch].size(), dtype=torch.long,
-                                device=x.device)
-        neg_out = predictor(emb[source_edge[batch]], emb[dst_neg])
-        neg_loss = -torch.log(1 - neg_out + 1e-15).mean()
-
-        loss = pos_loss + neg_loss
+        
+        # 移动到设备（如果使用GPU）
+        subgraph = subgraph.to("cuda")
+        
+        # 仅计算子图嵌入 - 节省显存！
+        emb = model(subgraph.x, subgraph.edge_index)
+        
+        # 获取当前批次的边（正负样本）
+        src, dst = subgraph.edge_label_index
+        edge_label = subgraph.edge_label
+        
+        # 计算预测得分
+        pred = predictor(emb[src], emb[dst]).view(-1)
+        
+        # 计算二元交叉熵损失
+        loss = F.binary_cross_entropy_with_logits(pred, edge_label)
+        
         loss.backward()
         optimizer.step()
-
-        num_examples = pos_out.size(0)
-        total_loss += loss.item() * num_examples
-        total_examples += num_examples
+        
+        total_loss += loss.item() * edge_label.size(0)
+        total_examples += edge_label.size(0)
+    
     return total_loss / total_examples
 
 
@@ -283,7 +302,7 @@ def run_lp(config):
         predictor.reset_parameters() if hasattr(predictor, 'reset_parameters') else None
         # 训练
         for epoch in range(config.task.n_epochs):
-            train_loss = train(encoder, predictor, data.x, data.adj_t, data.edge_split, optimizer, batch_size=config.task.batch_size)
+            train_loss = train(encoder, predictor, data, data.adj_t, data.edge_split, optimizer, batch_size=config.task.batch_size, num_neighbors=config.task.num_neighbors)
             print(f"[Run {run+1}] Epoch {epoch+1} | Train Loss: {train_loss:.4f}")
             if epoch % 1 == 0:
                 results = evaluate(encoder, predictor, data.x, data.adj_t, data.edge_split, config.dataset.num_neg, k_list=config.task.k_list)
