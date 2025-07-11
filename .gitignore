@@ -11,7 +11,3 @@ test_embedding_system.py
 *.sh
 
 # to be deleted
-.kilocode
-docs
-mm-graph-benchmark
-MAGB
