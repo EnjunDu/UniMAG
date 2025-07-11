@@ -13,3 +13,4 @@ MAGB
 MMAG
 mm-graph-benchmark
 .DS_Store
+*.sh

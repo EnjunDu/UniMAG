@@ -41,7 +41,7 @@ if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8:
     torch.backends.cudnn.allow_tf32 = True
 
 class FeaturePipeline:
-    MAGB_DATASETS = {"Grocery", "Toys", "Movies", "Reddit-S", "Reddit-M"}
+    MAGB_DATASETS = {"Grocery", "Toys", "Movies", "RedditS", "RedditM"}
     
     def __init__(self, config: Dict[str, Any]):
         """使用配置字典初始化特征提取管道。"""
