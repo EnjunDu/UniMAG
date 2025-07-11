@@ -1,7 +1,9 @@
 .specstory
 .cursorindexingignore
 .roocode
+.rooignore
 .kilocode
+.kilocodeignore
 Dataset_hugging_face
 hugging_face
 huggingface
