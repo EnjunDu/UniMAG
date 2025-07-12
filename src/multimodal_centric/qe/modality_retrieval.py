@@ -152,36 +152,42 @@ class MAGModalityRetriever:
 if __name__ == '__main__':
     print("=== 模态检索模块使用示例 ===")
 
-    # --- 配置 ---
-    DATASET = "Grocery"
-    ENCODER = "Qwen/Qwen2.5-VL-3B-Instruct"
+    # --- 固定配置 ---
+    DATASET_NAME = "Grocery"
+    ENCODER_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
     DIMENSION = 768
     QUERY_NODE = 5
-    MODALITY = "multimodal"
+    MODALITY = "text"  # 'image' or 'text'
     TOP_K = 5
+    # 服务器上的固定数据根目录
+    DATA_ROOT = "/home/ai/MMAG"
 
-    mock_config = {
+    # --- 初始化 ---
+    config = {
         "dataset": {
-            "name": DATASET,
-            "data_root": "/home/ai/MMAG"
+            "name": DATASET_NAME,
+            "data_root": DATA_ROOT
         }
     }
+    retriever = MAGModalityRetriever(config=config)
     
-    # 初始化 Retriever 和 EmbeddingManager
-    retriever = MAGModalityRetriever(config=mock_config)
-    embedding_manager = EmbeddingManager(base_path=mock_config['dataset']['data_root'])
-
-    # 加载嵌入以用于两个示例
-    all_embeddings = embedding_manager.get_embedding(
-        DATASET, MODALITY, ENCODER, DIMENSION
+    # --- 加载数据 ---
+    print(f"正在从数据集 '{DATASET_NAME}' 加载 '{MODALITY}' 嵌入...")
+    all_embeddings = retriever.embedding_manager.get_embedding(
+        DATASET_NAME, MODALITY, ENCODER_NAME, DIMENSION
     )
 
     if all_embeddings is None:
-        print(f"错误: 无法加载 '{DATASET}' 的 '{MODALITY}' 嵌入，无法继续执行示例。")
+        print(f"错误: 无法加载 '{DATASET_NAME}' 的 '{MODALITY}' 嵌入。")
+        print(f"请确保文件存在: {DATA_ROOT}/{DATASET_NAME}/{MODALITY}_features/{DATASET_NAME}_{MODALITY}_{ENCODER_NAME}_{DIMENSION}d.npy")
+        sys.exit(1)
+        
+    if QUERY_NODE >= len(all_embeddings):
+        print(f"错误: 查询节点 {QUERY_NODE} 超出范围 (0-{len(all_embeddings)-1})。")
         sys.exit(1)
 
     # --- 示例 1: 传统检索 ---
-    print(f"\n--- 示例 1: 传统检索 (使用来自 '{DATASET}' 的真实数据) ---")
+    print(f"\n--- 示例 1: 传统检索 (使用来自 '{DATASET_NAME}' 的真实数据) ---")
     query_embedding = all_embeddings[QUERY_NODE]
     
     # 从候选池中移除查询节点本身
@@ -197,17 +203,16 @@ if __name__ == '__main__':
     
     # 将候选索引映射回原始节点ID
     top_k_node_ids_traditional = candidate_indices[top_k_indices_in_candidates]
-    print(f"传统检索 Top-{TOP_K} 节点 ID: {top_k_node_ids_traditional}")
-
+    print(f"传统检索 Top-{TOP_K} 节点 ID (对于节点 {QUERY_NODE}): {top_k_node_ids_traditional}")
 
     # --- 示例 2: MAG 特定检索 ---
     print(f"\n--- 示例 2: MAG 特定检索 ---")
-    print(f"正在为数据集 '{DATASET}' 的节点 {QUERY_NODE} 进行 MAG 特定检索...")
+    print(f"正在为数据集 '{DATASET_NAME}' 的节点 {QUERY_NODE} 进行 MAG 特定检索...")
     
     top_nodes_mag = retriever.retrieve_mag_specific(
-        dataset_name=DATASET,
+        dataset_name=DATASET_NAME,
         query_node_id=QUERY_NODE,
-        encoder_name=ENCODER,
+        encoder_name=ENCODER_NAME,
         modality=MODALITY,
         dimension=DIMENSION,
         top_k=TOP_K
@@ -216,8 +221,8 @@ if __name__ == '__main__':
     if top_nodes_mag is not None:
         print(f"成功检索到 Top-{TOP_K} 节点: {top_nodes_mag}")
         # 比较两种方法的结果
-        print(f"\n比较传统检索与MAG特定检索的结果:")
-        print(f"传统:   {top_k_node_ids_traditional}")
-        print(f"MAG增强: {top_nodes_mag}")
+        print(f"\n--- 对比分析 (节点 {QUERY_NODE}) ---")
+        print(f"传统检索结果:   {top_k_node_ids_traditional}")
+        print(f"MAG 增强检索结果: {top_nodes_mag}")
     else:
         print("无法执行 MAG 特定检索。请检查嵌入文件和图结构。")

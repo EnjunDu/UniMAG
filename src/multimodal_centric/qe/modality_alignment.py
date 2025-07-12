@@ -341,52 +341,93 @@ class ModalityAligner:
 
 if __name__ == '__main__':
     print("=== 模态对齐模块使用示例 ===")
-    
-    # 初始化所有需要的组件
+
+    # --- 固定配置 ---
+    DATASET_NAME = "Grocery"
+    ENCODER_TYPE = "qwen_vl"
+    ENCODER_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
+    DIMENSION = 768
+    TARGET_NODE_ID = "1"  # 使用字符串ID
+    # 服务器上的固定数据根目录
+    DATA_ROOT = "/home/ai/MMAG"
+
+    # --- 初始化 ---
     aligner = ModalityAligner()
     manager = EmbeddingManager()
-    loader = GraphLoader() # 使用默认路径
-    
-    # 假设我们有一个测试图像和文本
-    # 注意：请将 "path/to/your/test_image.jpg" 替换为真实路径
-    test_image_path = "path/to/your/test_image.jpg" 
-    test_text = "A black cat is sitting on a red couch."
-    
-    # 1. 生成基准真值 (需要一个真实存在的图像)
-    print("\n--- 1. 生成基准真值 ---")
-    try:
-        ground_truth_data = aligner.generate_grounding_truth(test_image_path, test_text)
-        print(f"成功生成基准真值: {ground_truth_data}")
-    except FileNotFoundError:
-        print(f"错误: 测试图像未找到 at '{test_image_path}'. 请替换为有效路径。")
-        ground_truth_data = None
+    loader = GraphLoader()
 
-    if ground_truth_data:
+    # --- 加载真实数据进行测试 ---
+    print(f"--- 准备从 '{DATASET_NAME}' 数据集加载节点 '{TARGET_NODE_ID}' 的真实数据 ---")
+    
+    # 构造图像路径
+    # 遵循 embedding_converter/main.py 中的逻辑
+    img_dir_name = f"{DATASET_NAME}Images_extracted"
+    image_path = Path(DATA_ROOT) / DATASET_NAME / img_dir_name / f"{TARGET_NODE_ID}.jpg"
+
+    # 构造文本路径并加载文本
+    text_path = Path(DATA_ROOT) / DATASET_NAME / f"{DATASET_NAME}_text.jsonl"
+    node_text = ""
+    try:
+        with open(text_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                record = json.loads(line)
+                if record.get("asin") == TARGET_NODE_ID:
+                    node_text = record.get("text", "")
+                    break
+    except FileNotFoundError:
+        print(f"错误: 文本文件未找到: {text_path}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"读取或解析文本文件时出错: {e}")
+        sys.exit(1)
+
+    if not image_path.exists() or not node_text:
+        print(f"错误: 无法为节点 '{TARGET_NODE_ID}' 加载完整的图文数据。")
+        print(f"  - 检查图像是否存在: {image_path} ({'存在' if image_path.exists() else '不存在'})")
+        print(f"  - 检查文本是否已加载: {'是' if node_text else '否'}")
+        sys.exit(1)
+        
+    print(f"成功加载节点 '{TARGET_NODE_ID}' 的数据。")
+    print(f"  - 图像路径: {image_path}")
+    print(f"  - 文本: '{node_text[:100]}...'")
+
+
+    # 1. 生成基准真值
+    print("\n--- 1. 生成基准真值 ---")
+    ground_truth_data = aligner.generate_grounding_truth(str(image_path), node_text)
+    print(f"成功生成基准真值，找到 {len(ground_truth_data.get('grounding', []))} 个短语。")
+
+    if ground_truth_data and ground_truth_data.get('grounding'):
         # 2. 评估传统方法的对齐
         print("\n--- 2. 评估传统对齐 ---")
         traditional_results = aligner.evaluate_alignment(
             ground_truth=ground_truth_data,
             embedding_manager=manager,
-            encoder_type="qwen_vl",
-            encoder_name="Qwen/Qwen2.5-VL-3B-Instruct",
-            dimension=768
+            encoder_type=ENCODER_TYPE,
+            encoder_name=ENCODER_NAME,
+            dimension=DIMENSION
         )
-        print(f"传统对齐评估结果: {traditional_results}")
-        
+        print(f"传统对齐评估完成，处理了 {len(traditional_results)} 个短语。")
+        if traditional_results:
+            print(f"  - 示例结果: {traditional_results[0]}")
+
         # 3. 评估MAG特定方法的对齐
-        # 注意：这需要一个有效的数据集名称和节点ID
-        print("\n--- 3. 评估MAG特定对齐 (简化示例) ---")
+        print("\n--- 3. 评估MAG特定对齐 ---")
         try:
             mag_results = aligner.evaluate_mag_alignment(
-                node_id="1",
-                dataset_name="Grocery", # 假设使用books-nc
+                node_id=TARGET_NODE_ID,
+                dataset_name=DATASET_NAME,
                 ground_truth=ground_truth_data,
                 embedding_manager=manager,
                 graph_loader=loader,
-                encoder_type="qwen_vl",
-                encoder_name="Qwen/Qwen2.5-VL-3B-Instruct",
-                dimension=768
+                encoder_type=ENCODER_TYPE,
+                encoder_name=ENCODER_NAME,
+                dimension=DIMENSION
             )
-            print(f"MAG对齐评估结果: {mag_results}")
+            print(f"MAG对齐评估完成，处理了 {len(mag_results)} 个短语。")
+            if mag_results:
+                print(f"  - 示例结果: {mag_results[0]}")
         except Exception as e:
             print(f"MAG对齐评估失败: {e}")
+    else:
+        print("\n未能生成有效的基准真值，跳过对齐评估。")
