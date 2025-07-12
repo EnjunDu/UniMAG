@@ -4,6 +4,7 @@
 .rooignore
 .kilocodeignore
 Dataset_hugging_face
+hugging_face
 test_embedding_manager.py
 test_embedding_system.py
 **/__pycache__

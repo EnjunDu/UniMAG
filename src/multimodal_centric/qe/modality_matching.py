@@ -181,7 +181,7 @@ if __name__ == '__main__':
     DATASET_NAME = "Grocery"
     ENCODER_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
     DIMENSION = 768
-    TARGET_NODE = 5
+    TARGET_NODE = 1
     # 服务器上的固定数据根目录
     DATA_ROOT = "/home/ai/MMAG"
 
