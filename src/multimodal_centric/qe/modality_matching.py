@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 import numpy as np
 import torch
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, Dict, Any
 from torch_geometric.nn import GCNConv
 
 # 将项目根目录添加到Python路径中，以方便模块导入
@@ -19,6 +19,7 @@ project_root = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from utils.embedding_manager import EmbeddingManager
+from utils.graph_loader import GraphLoader
 
 def calculate_clip_score(
     image_embedding: np.ndarray,
@@ -50,17 +51,19 @@ class MAGModalityMatcher:
     """
     实现 MAG 特定的、考虑图上下文的模态匹配方法。
     """
-    def __init__(self, base_path: Optional[Union[str, Path]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
         初始化 MAG 特定的模态匹配器。
 
         Args:
-            base_path (Optional[Union[str, Path]]): 数据集的根目录路径。
+            config (Optional[Dict[str, Any]]): 包含任务和数据集配置的字典。
         """
+        self.config = config
+        # 从配置中获取嵌入的基础路径，如果存在的话
+        base_path = self.config.get('dataset', {}).get('data_root') if self.config else None
         self.embedding_manager = EmbeddingManager(base_path=base_path)
+        self.graph_loader = GraphLoader(config=self.config)
         self.gcn_layer = None
-        # TODO: 需要一个图数据加载器来获取图结构和邻接信息。
-        # self.graph_loader = GraphLoader()
 
     def _initialize_gcn_layer(self, in_dim: int, out_dim: int):
         """如果需要，则初始化GCN层。"""
@@ -69,17 +72,20 @@ class MAGModalityMatcher:
 
     def _get_graph_structure(self, dataset_name: str) -> Optional[torch.Tensor]:
         """
-        一个用于获取图结构的占位符方法。
-        
-        TODO: 实际实现需要调用一个图加载器来返回一个 PyG 格式的 edge_index 张量。
-              这个加载器是运行此模块的先决条件。
+        使用 GraphLoader 获取真实的图结构。
+
+        Args:
+            dataset_name (str): 数据集名称。
+
+        Returns:
+            Optional[torch.Tensor]: 图的 edge_index 张量，如果加载失败则返回 None。
         """
-        print(f"警告: 正在使用伪造的图结构 (edge_index) 用于 '{dataset_name}'。")
-        # 返回一个伪造的 edge_index [2, num_edges]
-        return torch.tensor([
-            [0, 1, 1, 2, 3, 0],
-            [1, 0, 2, 1, 0, 3]
-        ], dtype=torch.long)
+        try:
+            graph_data = self.graph_loader.load_graph(dataset_name)
+            return graph_data.edge_index
+        except (FileNotFoundError, ValueError) as e:
+            print(f"错误: 无法为数据集 '{dataset_name}' 加载图结构: {e}")
+            return None
 
     def get_neighbor_enhanced_embedding(
         self,
@@ -170,30 +176,49 @@ class MAGModalityMatcher:
 
 if __name__ == '__main__':
     print("=== 模态匹配模块使用示例 ===")
-
-    # --- 示例 1: 传统 CLIP-score 计算 ---
-    print("\n--- 示例 1: 传统 CLIP-score ---")
-    img_emb = np.random.rand(768).astype(np.float32)
-    txt_emb = img_emb + 0.1 * np.random.rand(768).astype(np.float32)
     
-    traditional_score = calculate_clip_score(img_emb, txt_emb)
-    print(f"计算出的传统 CLIP-score: {traditional_score:.2f}")
-
-    # --- 示例 2: MAG 特定 CLIP-score 计算 ---
-    print("\n--- 示例 2: MAG 特定 CLIP-score ---")
-    # 此示例使用预先生成的真实嵌入进行计算。
-    # 确保 'Grocery' 数据集的嵌入文件存在。
-    
+    # 全局配置
     DATASET = "Grocery"
     ENCODER = "Qwen/Qwen2.5-VL-3B-Instruct"
     DIMENSION = 768
     TARGET_NODE = 5
-
-    # 初始化匹配器
-    matcher = MAGModalityMatcher()
     
-    print(f"\n正在为数据集 '{DATASET}' 计算所有节点的 MAG 特定分数...")
+    # 初始化匹配器配置
+    config = {
+        "dataset": {
+            "name": DATASET,
+            "data_root": "/home/ai/MMAG"
+        }
+    }
+    matcher = MAGModalityMatcher(config=config)
     
+    # 加载基础嵌入（用于两个示例）
+    print(f"正在从数据集 '{DATASET}' 加载嵌入...")
+    image_embeds = matcher.embedding_manager.get_embedding(DATASET, "image", ENCODER, DIMENSION)
+    text_embeds = matcher.embedding_manager.get_embedding(DATASET, "text", ENCODER, DIMENSION)
+    
+    if image_embeds is None or text_embeds is None:
+        print("无法加载所需的嵌入文件。请确保 'Grocery' 数据集的嵌入已生成。")
+        exit(1)
+    
+    print(f"成功加载 {len(image_embeds)} 个节点的嵌入。")
+    
+    # --- 示例 1: 传统 CLIP-score 计算 (单个节点，无图上下文) ---
+    print("\n--- 示例 1: 传统 CLIP-score (节点自身模态对齐) ---")
+    
+    if TARGET_NODE < len(image_embeds):
+        node_img_emb = image_embeds[TARGET_NODE]
+        node_txt_emb = text_embeds[TARGET_NODE]
+        
+        traditional_score = calculate_clip_score(node_img_emb, node_txt_emb)
+        print(f"节点 {TARGET_NODE} 的传统 CLIP-score (无图上下文): {traditional_score:.2f}")
+    else:
+        print(f"错误: 目标节点 {TARGET_NODE} 超出范围 (0-{len(image_embeds)-1})。")
+        
+    # --- 示例 2: MAG 特定 CLIP-score 计算 (图上下文增强) ---
+    print("\n--- 示例 2: MAG 特定 CLIP-score (图上下文增强) ---")
+    
+    print(f"正在计算所有节点的 MAG 特定分数...")
     mag_scores = matcher.calculate_mag_clip_score(
         dataset_name=DATASET,
         encoder_name=ENCODER,
@@ -201,8 +226,16 @@ if __name__ == '__main__':
     )
 
     if mag_scores is not None:
-        print(f"成功计算出 {len(mag_scores)} 个节点的分数。")
+        print(f"成功计算出 {len(mag_scores)} 个节点的 MAG 特定分数。")
         print(f"平均 MAG 特定 CLIP-score: {np.mean(mag_scores):.2f}")
         print(f"前5个节点的分数: {np.round(mag_scores[:5], 2)}")
+        
+        # 对比分析
+        if TARGET_NODE < len(mag_scores):
+            enhanced_score = mag_scores[TARGET_NODE]
+            print(f"\n--- 对比分析 (节点 {TARGET_NODE}) ---")
+            print(f"传统方法分数: {traditional_score:.2f}")
+            print(f"MAG 增强分数: {enhanced_score:.2f}")
+            print(f"图上下文增益: {enhanced_score - traditional_score:.2f}")
     else:
-        print("无法计算 MAG 特定分数。请检查嵌入文件是否存在并且图结构是否正确。")
+        print("无法计算 MAG 特定分数。请检查图结构加载是否正确。")
