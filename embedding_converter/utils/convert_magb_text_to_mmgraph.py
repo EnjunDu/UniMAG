@@ -32,7 +32,7 @@ def get_textual_columns(df: pd.DataFrame) -> list[str]:
     # 定义需要排除的列名或模式（不区分大小写）
     excluded_patterns = [
         'id', 'asin', 'label', 'imageURL', 'url', 'also_buy', 'also_view', 
-        'text_length', 'category', 'price', 'second_category'
+        'text_length', 'price', 'second_category'
     ]
     
     text_cols = []

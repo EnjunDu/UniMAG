@@ -25,7 +25,7 @@ from embedding_converter.base_encoder import BaseEncoder, ModalityType
 from embedding_converter.utils.quality_checker import QualityChecker
 from embedding_converter.utils.config_loader import load_embedding_config
 from embedding_converter.utils.storage_manager import StorageManager
-from embedding_converter.utils.convert_magb_text_and_image_to_mmgraph import convert_csv_to_jsonl
+from embedding_converter.utils.convert_magb_text_to_mmgraph import convert_csv_to_jsonl
 
 # 导入此包以触发所有编码器的自动注册
 from embedding_converter import encoders
@@ -41,7 +41,7 @@ if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8:
     torch.backends.cudnn.allow_tf32 = True
 
 class FeaturePipeline:
-    MAGB_DATASETS = {"Grocery", "Toys", "Movies", "Reddit-S", "Reddit-M"}
+    MAGB_DATASETS = {"Grocery", "Toys", "Movies", "RedditS", "RedditM"}
     
     def __init__(self, config: Dict[str, Any]):
         """使用配置字典初始化特征提取管道。"""

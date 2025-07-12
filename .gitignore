@@ -1,14 +1,14 @@
 .specstory
 .cursorindexingignore
 .roocode
-.kilocode
+.rooignore
+.kilocodeignore
+Dataset_hugging_face
 hugging_face
-huggingface
-docs
 test_embedding_manager.py
 test_embedding_system.py
 **/__pycache__
-MAGB
-MMAG
-mm-graph-benchmark
 .DS_Store
+*.sh
+
+# to be deleted

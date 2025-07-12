@@ -77,7 +77,8 @@ class InternVL3Encoder(BaseEncoder):
         return mean_embeddings.detach().cpu().numpy()
     
     def encode_text(self, texts: List[str], **kwargs) -> np.ndarray:
-        native_dim = self.get_native_embedding_dim()
+        # 修复: 直接从模型配置获取真实的原生维度，避免被子类重写的方法影响
+        native_dim = self.model.config.text_config.hidden_size
         if not texts: return np.empty((0, native_dim), dtype=np.float32)
         final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float32)
         
@@ -115,33 +116,24 @@ class InternVL3Encoder(BaseEncoder):
         batch_size = kwargs.get('batch_size', 4)
 
         with torch.no_grad():
-            for i in tqdm(range(0, len(valid_paths), batch_size), desc="编码图像 (InternVL, Optimized)"):
+            for i in tqdm(range(0, len(valid_paths), batch_size), desc="编码图像 (InternVL)"):
                 batch_paths = valid_paths[i:i + batch_size]
                 try:
                     images = [Image.open(path).convert("RGB") for path in batch_paths]
-                    inputs = self.processor(images=images, return_tensors="pt").to(self.model.device)
-                    
-                    vision_outputs = self.model.vision_tower(
-                        inputs.pixel_values,
-                        output_hidden_states=True
-                    )
-                    image_features = vision_outputs.last_hidden_state
-                    image_embeds = self.model.projector(image_features)
-
-                    batch_size, seq_len, _ = image_embeds.shape
-                    attention_mask = torch.ones((batch_size, seq_len), device=self.model.device)
-                    
-                    batch_embeddings = self._extract_embeddings_from_hidden_states(image_embeds, attention_mask)
-                    
+                    # 对于纯图像，我们仍然需要一个虚拟的文本输入
+                    dummy_text = "Please describe the image in detail."
+                    inputs = self.processor(text=dummy_text, images=images, padding=True, return_tensors="pt").to(self.model.device)
+                    outputs = self.model(**inputs, output_hidden_states=True)
+                    batch_embeddings = self._extract_embeddings_from_hidden_states(outputs.hidden_states[-1], inputs.attention_mask)
                     original_indices = [valid_indices[j] for j in range(i, i + len(batch_paths))]
                     final_embeddings[original_indices, :] = batch_embeddings
                 except Exception as e:
-                    logger.error(f"处理图像批次时发生错误 (从索引 {i} 开始): {e}")
+                    logger.error(f"处理批次时发生错误 (从索引 {i} 开始): {e}")
                     continue
         return final_embeddings
 
     def encode_multimodal(self, texts: List[str], image_paths: List[str], **kwargs) -> np.ndarray:
-        native_dim = self.get_native_embedding_dim()
+        native_dim = self.model.config.text_config.hidden_size
         if len(texts) != len(image_paths): raise ValueError("文本和图像列表的长度必须相等")
         if not texts: return np.empty((0, native_dim), dtype=np.float32)
         final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float32)

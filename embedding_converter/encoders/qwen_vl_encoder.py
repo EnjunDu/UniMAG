@@ -86,10 +86,9 @@ class QwenVLEncoder(BaseEncoder):
         mean_embeddings = sum_embeddings / torch.clamp(sum_mask, min=1e-9)
         return mean_embeddings.detach().cpu().numpy()
     
-    def encode_text(self, texts: List[str], **kwargs) -> np.ndarray:
+    def encode_text(self, texts: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
         native_dim = self.model.config.hidden_size
         if not texts: return np.empty((0, native_dim))
-        final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float16)
         
         non_empty_texts, non_empty_indices = [], []
         for i, text in enumerate(texts):
@@ -97,9 +96,16 @@ class QwenVLEncoder(BaseEncoder):
                 non_empty_texts.append(text)
                 non_empty_indices.append(i)
 
-        if not non_empty_texts: return final_embeddings
+        if not non_empty_texts:
+            # 如果需要特征图，返回一个空的、形状合适的数组
+            if output_feature_map:
+                # 注意：这里的形状可能需要根据模型的具体输出进行调整
+                return np.empty((len(texts), 0, native_dim), dtype=np.float16)
+            return np.zeros((len(texts), native_dim), dtype=np.float16)
+
         batch_size = kwargs.get('batch_size', 8)
-        
+        all_outputs = []
+
         with torch.no_grad():
             for i in tqdm(range(0, len(non_empty_texts), batch_size), desc="编码文本"):
                 batch_texts = non_empty_texts[i:i + batch_size]
@@ -107,63 +113,95 @@ class QwenVLEncoder(BaseEncoder):
                 texts_formatted = [self.processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False) for msgs in messages_batch]
                 inputs = self.processor(text=texts_formatted, padding=True, return_tensors="pt").to(self.model.device)
                 outputs = self.model.model(input_ids=inputs['input_ids'], attention_mask=inputs['attention_mask'], output_hidden_states=True)
-                batch_embeddings = self._extract_embeddings_from_hidden_states(outputs.hidden_states[-1], inputs.attention_mask)
-                original_indices = [non_empty_indices[j] for j in range(i, i + len(batch_texts))]
-                final_embeddings[original_indices, :] = batch_embeddings
-        return final_embeddings
-    
-    def encode_image(self, image_paths: List[str], **kwargs) -> np.ndarray:
-        native_dim = self.model.config.hidden_size
-        if not image_paths: return np.empty((0, native_dim), dtype=np.float16)
-        final_embeddings = np.zeros((len(image_paths), native_dim), dtype=np.float16)
+                
+                if output_feature_map:
+                    # 返回倒数第二层的隐藏状态作为特征图
+                    # 注意：我们只保存有效文本的输出
+                    all_outputs.append(outputs.hidden_states[-2].detach().cpu().numpy())
+                else:
+                    batch_embeddings = self._extract_embeddings_from_hidden_states(outputs.hidden_states[-1], inputs.attention_mask)
+                    all_outputs.append(batch_embeddings)
 
-        valid_paths, valid_indices = [], []
+        # 根据是否输出特征图，决定如何组合和返回结果
+        if output_feature_map:
+            # 返回一个包含所有批次特征图（作为单独的numpy数组）的列表。
+            # 调用者将负责处理这个列表。
+            return all_outputs
+
+        # 合并嵌入向量
+        final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float16)
+        processed_count = 0
+        for batch_embeddings in all_outputs:
+            batch_size = batch_embeddings.shape[0]
+            original_indices = non_empty_indices[processed_count : processed_count + batch_size]
+            final_embeddings[original_indices, :] = batch_embeddings
+            processed_count += batch_size
+            
+        return final_embeddings
+
+    def encode_image(self, image_paths: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
+        native_dim = self.model.config.hidden_size
+        if not image_paths: return np.empty((0, native_dim))
+
+        non_empty_paths, non_empty_indices = [], []
         for i, path in enumerate(image_paths):
             if path and str(path).strip() and Path(path).exists():
-                valid_paths.append(path)
-                valid_indices.append(i)
+                non_empty_paths.append(path)
+                non_empty_indices.append(i)
 
-        if not valid_paths: return final_embeddings
+        if not non_empty_paths:
+            if output_feature_map:
+                return np.empty((len(image_paths), 0, native_dim), dtype=np.float16)
+            return np.zeros((len(image_paths), native_dim), dtype=np.float16)
+
         batch_size = kwargs.get('batch_size', 4)
+        all_outputs = []
 
         with torch.no_grad():
-            for i in tqdm(range(0, len(valid_paths), batch_size), desc="编码图像 (Optimized)"):
-                batch_paths = valid_paths[i:i + batch_size]
-                try:
-                    images = [Image.open(path).convert("RGB") for path in batch_paths]
-                    inputs = self.processor(images=images, return_tensors="pt").to(self.model.device)
-                    
-                    vision_outputs = self.model.vision_tower(
-                        inputs.pixel_values,
-                        output_hidden_states=True
-                    )
-                    image_embeds = self.model.visual.forward(vision_outputs)
+            for i in tqdm(range(0, len(non_empty_paths), batch_size), desc="编码图像"):
+                batch_paths = non_empty_paths[i:i + batch_size]
+                messages_batch = [[{"role": "user", "content": [{"type": "image", "image": f"file://{path}"}, {"type": "text", "text": "Please describe the image in detail."}]}] for path in batch_paths]
+                texts_formatted = [self.processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False) for msgs in messages_batch]
+                image_inputs, _ = process_vision_info(messages_batch)
+                inputs = self.processor(text=texts_formatted, images=image_inputs, padding=True, return_tensors="pt").to(self.model.device)
+                outputs = self.model(**inputs, output_hidden_states=True)
+                
+                if output_feature_map:
+                    all_outputs.append(outputs.hidden_states[-2].detach().cpu().numpy())
+                else:
+                    batch_embeddings = self._extract_embeddings_from_hidden_states(outputs.hidden_states[-1], inputs.attention_mask)
+                    all_outputs.append(batch_embeddings)
+        
+        if output_feature_map:
+            return all_outputs
 
-                    batch_size, seq_len, _ = image_embeds.shape
-                    attention_mask = torch.ones((batch_size, seq_len), device=self.model.device)
-                    
-                    batch_embeddings = self._extract_embeddings_from_hidden_states(image_embeds, attention_mask)
-                    
-                    original_indices = [valid_indices[j] for j in range(i, i + len(batch_paths))]
-                    final_embeddings[original_indices, :] = batch_embeddings
-                except Exception as e:
-                    logger.error(f"处理图像批次时发生错误 (从索引 {i} 开始): {e}")
-                    continue
+        final_embeddings = np.zeros((len(image_paths), native_dim), dtype=np.float16)
+        processed_count = 0
+        for batch_embeddings in all_outputs:
+            batch_size = batch_embeddings.shape[0]
+            original_indices = non_empty_indices[processed_count : processed_count + batch_size]
+            final_embeddings[original_indices, :] = batch_embeddings
+            processed_count += batch_size
+
         return final_embeddings
 
-    def encode_multimodal(self, texts: List[str], image_paths: List[str], **kwargs) -> np.ndarray:
+    def encode_multimodal(self, texts: List[str], image_paths: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
         native_dim = self.model.config.hidden_size
         if len(texts) != len(image_paths): raise ValueError("文本和图像列表的长度必须相等")
         if not texts: return np.empty((0, native_dim))
-        final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float16)
 
         valid_indices, valid_texts, valid_image_paths = [], [], []
         for i, (text, path) in enumerate(zip(texts, image_paths)):
             if text and str(path).strip() and Path(path).exists():
                 valid_indices.append(i); valid_texts.append(text); valid_image_paths.append(path)
         
-        if not valid_texts: return final_embeddings
+        if not valid_texts:
+            if output_feature_map:
+                return np.empty((len(texts), 0, native_dim), dtype=np.float16)
+            return np.zeros((len(texts), native_dim), dtype=np.float16)
+
         batch_size = kwargs.get('batch_size', 4)
+        all_outputs = []
         
         with torch.no_grad():
             for i in tqdm(range(0, len(valid_texts), batch_size), desc="编码多模态"):
@@ -174,9 +212,24 @@ class QwenVLEncoder(BaseEncoder):
                 image_inputs, _ = process_vision_info(messages_batch)
                 inputs = self.processor(text=texts_formatted, images=image_inputs, padding=True, return_tensors="pt").to(self.model.device)
                 outputs = self.model(**inputs, output_hidden_states=True)
-                batch_embeddings = self._extract_embeddings_from_hidden_states(outputs.hidden_states[-1], inputs.attention_mask)
-                original_indices = [valid_indices[j] for j in range(i, i + len(batch_texts))]
-                final_embeddings[original_indices, :] = batch_embeddings
+                
+                if output_feature_map:
+                    all_outputs.append(outputs.hidden_states[-2].detach().cpu().numpy())
+                else:
+                    batch_embeddings = self._extract_embeddings_from_hidden_states(outputs.hidden_states[-1], inputs.attention_mask)
+                    all_outputs.append(batch_embeddings)
+
+        if output_feature_map:
+            return all_outputs
+
+        final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float16)
+        processed_count = 0
+        for batch_embeddings in all_outputs:
+            batch_size = batch_embeddings.shape[0]
+            original_indices = valid_indices[processed_count : processed_count + batch_size]
+            final_embeddings[original_indices, :] = batch_embeddings
+            processed_count += batch_size
+            
         return final_embeddings
 
 @EncoderFactory.register("qwen_vl_with_dim")

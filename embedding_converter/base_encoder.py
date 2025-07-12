@@ -54,7 +54,7 @@ class BaseEncoder(abc.ABC):
         raise NotImplementedError
     
     @abc.abstractmethod
-    def encode_text(self, texts: List[str], **kwargs) -> np.ndarray:
+    def encode_text(self, texts: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
         """
         将一批文本编码为嵌入向量。
         子类必须实现此方法。
@@ -62,7 +62,7 @@ class BaseEncoder(abc.ABC):
         raise NotImplementedError
     
     @abc.abstractmethod
-    def encode_image(self, image_paths: List[str], **kwargs) -> np.ndarray:
+    def encode_image(self, image_paths: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
         """
         将一批图像编码为嵌入向量。
         子类必须实现此方法。
@@ -70,14 +70,14 @@ class BaseEncoder(abc.ABC):
         raise NotImplementedError
     
     @abc.abstractmethod
-    def encode_multimodal(self, texts: List[str], image_paths: List[str], **kwargs) -> np.ndarray:
+    def encode_multimodal(self, texts: List[str], image_paths: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
         """
         将一批图文对编码为多模态嵌入向量。
         子类必须实现此方法。
         """
         raise NotImplementedError
     
-    def encode(self, modality: ModalityType, texts: Optional[List[str]] = None, image_paths: Optional[List[str]] = None, **kwargs) -> np.ndarray:
+    def encode(self, modality: ModalityType, texts: Optional[List[str]] = None, image_paths: Optional[List[str]] = None, output_feature_map: bool = False, **kwargs) -> np.ndarray:
         """
         统一的编码调度接口。
         根据指定的模态调用相应的编码方法。
@@ -85,14 +85,14 @@ class BaseEncoder(abc.ABC):
         if modality == ModalityType.TEXT:
             if texts is None:
                 raise ValueError("进行文本编码时，'texts'参数不能为空。")
-            return self.encode_text(texts, **kwargs)
+            return self.encode_text(texts, output_feature_map=output_feature_map, **kwargs)
         elif modality == ModalityType.IMAGE:
             if image_paths is None:
                 raise ValueError("进行图像编码时，'image_paths'参数不能为空。")
-            return self.encode_image(image_paths, **kwargs)
+            return self.encode_image(image_paths, output_feature_map=output_feature_map, **kwargs)
         elif modality == ModalityType.MULTIMODAL:
             if texts is None or image_paths is None:
                 raise ValueError("进行多模态编码时，'texts'和'image_paths'参数均不能为空。")
-            return self.encode_multimodal(texts, image_paths, **kwargs)
+            return self.encode_multimodal(texts, image_paths, output_feature_map=output_feature_map, **kwargs)
         else:
             raise ValueError(f"不支持的模态类型: {modality}")

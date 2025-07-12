@@ -9,7 +9,8 @@
 import sys
 from pathlib import Path
 import numpy as np
-from typing import Optional, Union
+from typing import Optional, Union, List, Any
+from PIL.Image import Image
 
 # 将项目根目录添加到Python路径中
 project_root = Path(__file__).resolve().parent.parent
@@ -18,6 +19,10 @@ sys.path.insert(0, str(project_root))
 # 导入位于子模块中的底层工具
 from embedding_converter.utils.storage_manager import StorageManager
 from embedding_converter.utils.view_npy_file import view_npy as view_npy_file_content
+from embedding_converter.encoder_factory import EncoderFactory
+from embedding_converter.base_encoder import ModalityType
+# 导入此包以触发所有编码器的自动注册
+from embedding_converter import encoders
 
 class EmbeddingManager:
     """
@@ -33,6 +38,7 @@ class EmbeddingManager:
                 将使用StorageManager中的默认路径 (例如 /home/ai/MMAG)。
         """
         self._storage = StorageManager(base_path=base_path)
+        self._encoders: Dict[str, Any] = {}
 
     def get_embedding(
         self,
@@ -65,6 +71,66 @@ class EmbeddingManager:
             return None
         
         return self._storage.load_features(feature_path)
+
+    def generate_embedding(
+        self,
+        data: Union[List[str], List[Image], tuple],
+        modality: str,
+        encoder_type: str,
+        encoder_name: str,
+        dimension: Optional[int] = None,
+        output_feature_map: bool = False,
+        **kwargs
+    ) -> Optional[np.ndarray]:
+        """
+        即时生成嵌入向量或特征图。
+
+        Args:
+            data (Union[List[str], List[Image], tuple]): 原始数据。
+                - 对于 "text": 文本字符串列表 (List[str])。
+                - 对于 "image": PIL图像对象或图像路径字符串的列表 (List[Union[Image, str]])。
+                - 对于 "multimodal": (texts, images) 的元组，其中 images 是 List[Union[Image, str]]。
+            modality (str): 模态 ("text", "image", 或 "multimodal")。
+            encoder_type (str): 在EncoderFactory中注册的编码器类型 (例如, "qwen_vl", "bert")。
+            encoder_name (str): 编码器模型的Hugging Face名称。
+            dimension (Optional[int]): 目标特征维度。如果为None，则使用原生维度。
+            output_feature_map (bool): 如果为True，则返回特征图而不是嵌入向量。
+            **kwargs: 传递给编码器的其他参数 (例如, cache_dir, device)。
+
+        Returns:
+            np.ndarray: 生成的嵌入向量或特征图。
+        """
+        try:
+            modality_enum = ModalityType(modality)
+        except ValueError:
+            print(f"错误: 不支持的模态 '{modality}'")
+            return None
+
+        encoder_instance_key = f"{encoder_type}_{encoder_name}_{dimension or 'native'}"
+        if encoder_instance_key not in self._encoders:
+            factory_encoder_type = f"{encoder_type}_with_dim" if dimension else encoder_type
+            
+            encoder_kwargs = {
+                'model_name': encoder_name,
+                'cache_dir': kwargs.get('cache_dir'),
+                'device': kwargs.get('device')
+            }
+            if dimension:
+                encoder_kwargs['target_dimension'] = dimension
+
+            self._encoders[encoder_instance_key] = EncoderFactory.create_encoder(factory_encoder_type, **encoder_kwargs)
+        
+        encoder = self._encoders[encoder_instance_key]
+
+        if modality_enum == ModalityType.TEXT:
+            return encoder.encode_text(data, output_feature_map=output_feature_map, **kwargs)
+        elif modality_enum == ModalityType.IMAGE:
+            return encoder.encode_image(data, output_feature_map=output_feature_map, **kwargs)
+        elif modality_enum == ModalityType.MULTIMODAL:
+            texts, image_paths = data
+            return encoder.encode_multimodal(texts, image_paths, output_feature_map=output_feature_map, **kwargs)
+        
+        return None
 
     def view_embedding(
         self,
@@ -129,3 +195,15 @@ if __name__ == '__main__':
         encoder_name="Qwen/Qwen2.5-VL-3B-Instruct",
         dimension=None  # 查看原生维度
     )
+
+    # 4. 即时生成嵌入
+    print("\n--- 示例3: 即时生成文本嵌入 ---")
+    custom_texts = ["这是一个测试。", "这是另一个测试。"]
+    on_the_fly_embeddings = manager.generate_embedding(
+        data=custom_texts,
+        modality="text",
+        encoder_type="qwen_vl",
+        encoder_name="Qwen/Qwen2.5-VL-7B-Instruct" # 使用一个具体的模型
+    )
+    if on_the_fly_embeddings is not None:
+        print(f"成功即时生成文本嵌入，形状: {on_the_fly_embeddings.shape}")
