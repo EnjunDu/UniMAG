@@ -124,16 +124,9 @@ class QwenVLEncoder(BaseEncoder):
 
         # 根据是否输出特征图，决定如何组合和返回结果
         if output_feature_map:
-            # 对于特征图，我们可能需要更复杂的处理来合并不同大小的批次
-            # 这里我们返回一个列表，或者进行填充后合并
-            # 为了简化，我们假设调用者能处理列表
-            # TODO: 当前实现只返回第一个批次的特征图，这是一个简化处理。
-            # 一个完整的实现需要一个更健壮的策略来处理不同批次可能产生的不同序列长度的特征图。
-            # 可能的解决方案包括：
-            # 1. 将所有批次的特征图填充（pad）到相同的最大序列长度，然后合并成一个大的numpy数组。
-            # 2. 直接返回一个包含所有批次特征图（作为单独的numpy数组）的列表。
-            # 当前选择返回第一个批次是为了满足基本的功能原型。
-            return all_outputs[0] if all_outputs else np.empty((0, 0, native_dim))
+            # 返回一个包含所有批次特征图（作为单独的numpy数组）的列表。
+            # 调用者将负责处理这个列表。
+            return all_outputs
 
         # 合并嵌入向量
         final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float16)
@@ -180,7 +173,7 @@ class QwenVLEncoder(BaseEncoder):
                     all_outputs.append(batch_embeddings)
         
         if output_feature_map:
-            return all_outputs[0] if all_outputs else np.empty((0, 0, native_dim))
+            return all_outputs
 
         final_embeddings = np.zeros((len(image_paths), native_dim), dtype=np.float16)
         processed_count = 0
@@ -227,7 +220,7 @@ class QwenVLEncoder(BaseEncoder):
                     all_outputs.append(batch_embeddings)
 
         if output_feature_map:
-            return all_outputs[0] if all_outputs else np.empty((0, 0, native_dim))
+            return all_outputs
 
         final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float16)
         processed_count = 0
