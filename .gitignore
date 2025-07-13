@@ -3,12 +3,5 @@
 .roocode
 .rooignore
 .kilocodeignore
-Dataset_hugging_face
-hugging_face
-test_embedding_manager.py
-test_embedding_system.py
 **/__pycache__
 .DS_Store
-*.sh
-
-# to be deleted

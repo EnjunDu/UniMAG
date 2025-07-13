@@ -96,10 +96,11 @@ The datasets are given in huggingface [https://huggingface.co/datasets/enjun-col
 The Quality Evaluation (QE) tasks are designed to assess the quality and alignment of multimodal embeddings. The implementation will reside in `src/multimodal_centric/qe/`.
 
 -   **Core References**:
+    
     -   **CLIP**: For baseline similarity metrics. [Radford, et al. (2021)](https://arxiv.org/abs/2103.00020).
     -   **UniGraph2**: For leveraging graph structure in MAG-specific tasks. [He, Y., et al. (2025)](https://arxiv.org/abs/2502.00806).
     -   **FG-CLIP**: For methodologies in fine-grained, region-based alignment. [Xie, C., et al. (2025)](https://arxiv.org/abs/2505.05071).
-
+    
 -   **Planned Project Architecture**:
     ```
     src/multimodal_centric/qe/
