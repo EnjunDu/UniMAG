@@ -183,7 +183,7 @@ Design:
 
 ##### Task Arrangement
 
-**Target Task**: Similar to *G2Text*, but aimed at generating images from Multimodal Attributed Graphs (MMAGs).
+**Target Task**: Similar to *G2Text*, but aimed at generating images from Multimodal Attributed Graphs (MMAGs).【Zhenning Zhang】
 
 - **Reference**: [Multimodal Graph-to-Image Generation with Graph Context-Conditioned Diffusion Models (arXiv:2410.07157)](https://arxiv.org/abs/2410.07157?utm_source=chatgpt.com)
 - **Motivation**: This task aims to generate images conditioned on structured multimodal graph data. The referenced method introduces a *Graph Context-Conditioned Diffusion Model* to handle the complexity of graph structures and multimodal attributes.
