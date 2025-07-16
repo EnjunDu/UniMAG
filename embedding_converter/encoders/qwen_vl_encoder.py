@@ -2,7 +2,8 @@ import torch
 import numpy as np
 from PIL import Image
 from typing import List, Optional, Union, Literal
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+from transformers import AutoModelForImageTextToText
+from transformers import AutoProcessor
 import logging
 from tqdm import tqdm
 from pathlib import Path
@@ -64,7 +65,7 @@ class QwenVLEncoder(BaseEncoder):
             if self.attn_implementation and self.device and self.device.startswith("cuda"):
                 model_kwargs["attn_implementation"] = self.attn_implementation
             
-            self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(self.model_name, **model_kwargs)
+            self.model = AutoModelForImageTextToText.from_pretrained(self.model_name, **model_kwargs)
             
             if self.device and ("device_map" not in model_kwargs or model_kwargs.get("device_map") is None):
                 self.model = self.model.to(self.device)
@@ -124,9 +125,9 @@ class QwenVLEncoder(BaseEncoder):
 
         # 根据是否输出特征图，决定如何组合和返回结果
         if output_feature_map:
-            # 返回一个包含所有批次特征图（作为单独的numpy数组）的列表。
-            # 调用者将负责处理这个列表。
-            return all_outputs
+            if not all_outputs:
+                return np.array([])
+            return np.concatenate(all_outputs, axis=0)
 
         # 合并嵌入向量
         final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float16)
@@ -173,7 +174,9 @@ class QwenVLEncoder(BaseEncoder):
                     all_outputs.append(batch_embeddings)
         
         if output_feature_map:
-            return all_outputs
+            if not all_outputs:
+                return np.array([])
+            return np.concatenate(all_outputs, axis=0)
 
         final_embeddings = np.zeros((len(image_paths), native_dim), dtype=np.float16)
         processed_count = 0
@@ -220,7 +223,9 @@ class QwenVLEncoder(BaseEncoder):
                     all_outputs.append(batch_embeddings)
 
         if output_feature_map:
-            return all_outputs
+            if not all_outputs:
+                return np.array([])
+            return np.concatenate(all_outputs, axis=0)
 
         final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float16)
         processed_count = 0
@@ -247,17 +252,23 @@ class QwenVLEncoderWithDimension(QwenVLEncoder):
     def _apply_dimension_reduction(self, embeddings: np.ndarray) -> np.ndarray:
         return self.dimension_reducer.transform(embeddings)
 
-    def encode_text(self, texts: List[str], **kwargs) -> np.ndarray:
-        native_embeddings = super().encode_text(texts, **kwargs)
-        return self._apply_dimension_reduction(native_embeddings)
-    
-    def encode_image(self, image_paths: List[str], **kwargs) -> np.ndarray:
-        native_embeddings = super().encode_image(image_paths, **kwargs)
-        return self._apply_dimension_reduction(native_embeddings)
-    
-    def encode_multimodal(self, texts: List[str], image_paths: List[str], **kwargs) -> np.ndarray:
-        native_embeddings = super().encode_multimodal(texts, image_paths, **kwargs)
-        return self._apply_dimension_reduction(native_embeddings)
+    def encode_text(self, texts: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
+        native_output = super().encode_text(texts, output_feature_map=output_feature_map, **kwargs)
+        if output_feature_map:
+            return native_output
+        return self._apply_dimension_reduction(native_output)
+
+    def encode_image(self, image_paths: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
+        native_output = super().encode_image(image_paths, output_feature_map=output_feature_map, **kwargs)
+        if output_feature_map:
+            return native_output
+        return self._apply_dimension_reduction(native_output)
+
+    def encode_multimodal(self, texts: List[str], image_paths: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
+        native_output = super().encode_multimodal(texts, image_paths, output_feature_map=output_feature_map, **kwargs)
+        if output_feature_map:
+            return native_output
+        return self._apply_dimension_reduction(native_output)
     
     def get_native_embedding_dim(self) -> int:
         return self.target_dimension
