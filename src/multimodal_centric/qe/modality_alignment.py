@@ -14,6 +14,15 @@
     - **传统方法**: 直接在图像和短语上评估我们自己编码器的对齐能力。
     - **MAG特定方法**: 利用图结构，在邻域增强的特征图上进行评估。
 """
+import sys
+import os
+import glob
+from tqdm import tqdm
+
+# 将项目根目录添加到 sys.path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 import torch
 import spacy
@@ -141,7 +150,7 @@ class ModalityAligner:
             float: 对齐分数 (余弦相似度)。
         """
         # RoIAlign需要一个批次的边界框
-        box_tensor = torch.tensor([box], dtype=torch.float32, device=self.device)
+        box_tensor = torch.tensor([box], dtype=feature_map.dtype, device=self.device)
         
         # roi_align的输出尺寸可以根据需要调整
         # 这里我们假设输出一个固定大小的区域特征，例如 7x7
@@ -190,12 +199,14 @@ class ModalityAligner:
             dimension=dimension,
             output_feature_map=True
         )
-        if not feature_maps:
+        if feature_maps.size == 0:
             print("错误: 无法生成特征图。")
             return []
         
         # 将numpy数组转为torch张量
-        feature_map = torch.from_numpy(feature_maps[0]).to(self.device)
+        feature_map = torch.from_numpy(feature_maps).to(self.device)
+        if feature_map.ndim == 3:
+            feature_map = feature_map.unsqueeze(0)
         
         results = []
         for phrase, box in ground_truth["grounding"]:
@@ -269,13 +280,13 @@ class ModalityAligner:
         
         # 2. 构建图像路径列表
         image_paths = []
-        for nid in all_node_ids:
-            # 遵循 embedding_converter/main.py 中的逻辑
-            img_dir_name = f"{dataset_name}Images_extracted" if dataset_name in ["Grocery", "Movies", "Reddit-M", "Reddit-S", "Toys"] else f"{dataset_name}-images_extracted"
-            img_path = dataset_path / img_dir_name / f"{nid}.jpg"
-            if not img_path.exists():
-                 img_path = dataset_path / img_dir_name / nid / f"{nid}.jpg" # 兼容可能的子目录结构
-            image_paths.append(str(img_path) if img_path.exists() else "")
+        dataset_root_str = str(dataset_path)
+        # 预先扫描所有图片，构建一个从ID到路径的映射
+        all_images = glob.glob(os.path.join(dataset_root_str, '**', f"*.jpg"), recursive=True)
+        image_map = {Path(p).stem: p for p in all_images}
+
+        for nid in tqdm(all_node_ids, desc="构建图像路径"):
+            image_paths.append(image_map.get(nid, ""))
 
         # 3. 批量获取所有节点的特征图
         all_feature_maps_list = embedding_manager.generate_embedding(
@@ -360,19 +371,27 @@ if __name__ == '__main__':
     print(f"--- 准备从 '{DATASET_NAME}' 数据集加载节点 '{TARGET_NODE_ID}' 的真实数据 ---")
     
     # 构造图像路径
-    # 遵循 embedding_converter/main.py 中的逻辑
-    img_dir_name = f"{DATASET_NAME}Images_extracted"
-    image_path = Path(DATA_ROOT) / DATASET_NAME / img_dir_name / f"{TARGET_NODE_ID}.jpg"
+    dataset_dir = Path(DATA_ROOT) / DATASET_NAME
+    search_pattern = os.path.join(str(dataset_dir), '**', f"{TARGET_NODE_ID}.*")
+    found_files = glob.glob(search_pattern, recursive=True)
+    image_path = Path(found_files[0]) if found_files else None
 
     # 构造文本路径并加载文本
-    text_path = Path(DATA_ROOT) / DATASET_NAME / f"{DATASET_NAME}_text.jsonl"
+    text_path = dataset_dir / f"{DATASET_NAME}-raw-text.jsonl"
     node_text = ""
     try:
         with open(text_path, 'r', encoding='utf-8') as f:
             for line in f:
                 record = json.loads(line)
-                if record.get("asin") == TARGET_NODE_ID:
-                    node_text = record.get("text", "")
+                # 兼容 'id' 和 'asin' 两种节点标识符
+                current_id = record.get("id") or record.get("asin")
+                if str(current_id) == TARGET_NODE_ID:
+                    raw_text = record.get("raw_text", "")
+                    # 确保文本是字符串，如果是列表则拼接
+                    if isinstance(raw_text, list):
+                        node_text = " ".join(raw_text)
+                    else:
+                        node_text = str(raw_text)
                     break
     except FileNotFoundError:
         print(f"错误: 文本文件未找到: {text_path}")
@@ -381,7 +400,7 @@ if __name__ == '__main__':
         print(f"读取或解析文本文件时出错: {e}")
         sys.exit(1)
 
-    if not image_path.exists() or not node_text:
+    if not image_path or not image_path.exists() or not node_text:
         print(f"错误: 无法为节点 '{TARGET_NODE_ID}' 加载完整的图文数据。")
         print(f"  - 检查图像是否存在: {image_path} ({'存在' if image_path.exists() else '不存在'})")
         print(f"  - 检查文本是否已加载: {'是' if node_text else '否'}")
