@@ -18,8 +18,11 @@ class MLP(nn.Module):
 
             if i < num_layers - 1:
                 self.norms.append(nn.BatchNorm1d(hidden_dim))
-
+        
         self.dropout = nn.Dropout(dropout)
+
+        self.vision_head = nn.Linear(hidden_dim, hidden_dim)
+        self.text_head = nn.Linear(hidden_dim, hidden_dim)
 
     def reset_parameters(self):
         for linear in self.linears:
@@ -34,8 +37,13 @@ class MLP(nn.Module):
         for i in range(self.num_layers - 1):
             h = F.relu(self.norms[i](self.linears[i](h)))
             h = self.dropout(h)
+        x = self.linears[-1](h)
+        # 模态级+节点级输出
+        x_vision = F.dropout(F.relu(self.vision_head(x)), p=self.dropout, training=self.training)
+        x_text = F.dropout(F.relu(self.text_head(x)), p=self.dropout, training=self.training)
 
-        return self.linears[-1](h)
+        return x, x_vision, x_text
+
 
 class GCN(nn.Module):
     def __init__(self, in_dim, hidden_dim, num_layers, dropout):
@@ -48,6 +56,9 @@ class GCN(nn.Module):
         # 隐藏层
         for _ in range(num_layers - 1):
             self.convs.append(GCNConv(hidden_dim, hidden_dim))
+        
+        self.vision_head = nn.Linear(hidden_dim, hidden_dim)
+        self.text_head = nn.Linear(hidden_dim, hidden_dim)
 
     def reset_parameters(self):
         for conv in self.convs:
@@ -58,7 +69,12 @@ class GCN(nn.Module):
             if i != len(self.convs) - 1:
                 x = F.relu(x)
                 x = F.dropout(x, p=self.dropout, training=self.training)
-        return x  # 输出嵌入，分类器在外部接
+        
+        # 模态级+节点级输出
+        x_vision = F.dropout(F.relu(self.vision_head(x)), p=self.dropout, training=self.training)
+        x_text = F.dropout(F.relu(self.text_head(x)), p=self.dropout, training=self.training)
+
+        return x, x_vision, x_text  # 输出嵌入，分类器在外部接
 
 class GraphSAGE(nn.Module):
     def __init__(self, in_dim, hidden_dim, num_layers, dropout):
@@ -71,6 +87,9 @@ class GraphSAGE(nn.Module):
         # 隐藏层
         for _ in range(num_layers - 1):
             self.convs.append(SAGEConv(hidden_dim, hidden_dim))
+        
+        self.vision_head = nn.Linear(hidden_dim, hidden_dim)
+        self.text_head = nn.Linear(hidden_dim, hidden_dim)
 
     def reset_parameters(self):
         for conv in self.convs:
@@ -81,18 +100,25 @@ class GraphSAGE(nn.Module):
             if i != len(self.convs) - 1:
                 x = F.relu(x)
                 x = F.dropout(x, p=self.dropout, training=self.training)
-        return x  # 输出嵌入
+        # 模态级+节点级输出
+        x_vision = F.dropout(F.relu(self.vision_head(x)), p=self.dropout, training=self.training)
+        x_text = F.dropout(F.relu(self.text_head(x)), p=self.dropout, training=self.training)
+
+        return x, x_vision, x_text
 
 class GAT(nn.Module):
-    def __init__(self, in_dim, hidden_dim, num_layers, heads, dropout):
+    def __init__(self, in_dim, hidden_dim, num_layers, heads, dropout, att_dropout=0):
         super(GAT, self).__init__()
         self.convs = nn.ModuleList()
         self.dropout = dropout
         
-        self.convs.append(GATConv(in_dim, hidden_dim, heads=heads, dropout=dropout))
+        self.convs.append(GATConv(in_dim, hidden_dim, heads=heads, dropout=att_dropout))
         for _ in range(num_layers - 2):
-            self.convs.append(GATConv(hidden_dim * heads, hidden_dim, heads=heads, dropout=dropout))
-        self.convs.append(GATConv(hidden_dim * heads, hidden_dim, heads=1, dropout=dropout))
+            self.convs.append(GATConv(hidden_dim * heads, hidden_dim, heads=heads, dropout=att_dropout))
+        self.convs.append(GATConv(hidden_dim * heads, hidden_dim, heads=1, dropout=att_dropout))
+
+        self.vision_head = nn.Linear(hidden_dim, hidden_dim)
+        self.text_head = nn.Linear(hidden_dim, hidden_dim)
     
     def reset_parameters(self):
         for conv in self.convs:
@@ -103,4 +129,8 @@ class GAT(nn.Module):
             if i != len(self.convs) - 1:
                 x = F.relu(x)
                 x = F.dropout(x, p=self.dropout, training=self.training)
-        return x
+        # 模态级+节点级输出
+        x_vision = F.dropout(F.relu(self.vision_head(x)), p=self.dropout, training=self.training)
+        x_text = F.dropout(F.relu(self.text_head(x)), p=self.dropout, training=self.training)
+
+        return x, x_vision, x_text

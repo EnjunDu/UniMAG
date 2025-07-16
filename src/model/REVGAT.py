@@ -247,6 +247,7 @@ class RevGATBlock(nn.Module):
             efeat_emb = None
 
         out = self.conv(graph, out, perm).flatten(1, -1)
+
         return out
 
 
@@ -329,6 +330,9 @@ class RevGAT(nn.Module):
         self.dropout = dropout
         self.dp_last = nn.Dropout(dropout)
         self.activation = activation
+        self.vision_head = nn.Linear(n_hidden, n_hidden)
+        self.text_head = nn.Linear(n_hidden, n_hidden)
+    
 
     def reset_parameters(self):
         for conv in self.convs:
@@ -365,5 +369,8 @@ class RevGAT(nn.Module):
 
         h = h.mean(1)
         h = self.bias_last(h)
+        # 模态级+节点级输出
+        x_vision = F.dropout(F.relu(self.vision_head(h)), p=self.dropout, training=self.training)
+        x_text = F.dropout(F.relu(self.text_head(h)), p=self.dropout, training=self.training)
 
-        return h
+        return h, x_vision, x_text

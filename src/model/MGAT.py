@@ -124,7 +124,7 @@ class MGAT(torch.nn.Module):
         # representation = (v_rep+a_rep+t_rep)/3
         representation = (v_rep+t_rep)/2
         self.result = representation
-        return representation
+        return representation, v_rep, t_rep
 
     def reset_parameters(self):
         """重置所有可学习参数"""

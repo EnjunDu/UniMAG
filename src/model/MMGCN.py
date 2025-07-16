@@ -161,5 +161,5 @@ class Net(torch.nn.Module):
         # representation = (v_rep+a_rep+t_rep)/3
         representation = (v_rep+t_rep)/2
         self.result = representation
-        return representation
+        return representation, v_rep, t_rep
 
