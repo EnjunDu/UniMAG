@@ -51,7 +51,7 @@ class EmbeddingManager:
         获取指定参数的嵌入向量。
 
         Args:
-            dataset_name (str): 数据集名称 (例如 "books-nc-50")。
+            dataset_name (str): 数据集名称 (例如 "books-nc")。
             modality (str): 模态 ("text", "image", 或 "multimodal")。
             encoder_name (str): 编码器模型的Hugging Face名称 (例如 "Qwen/Qwen2.5-VL-3B-Instruct")。
             dimension (Optional[int]): 特征维度。如果为None，则获取原生维度特征。
@@ -177,9 +177,9 @@ if __name__ == '__main__':
     # local_manager = EmbeddingManager(base_path="./hugging_face")
 
     # 2. 获取嵌入向量
-    print("\n--- 示例1: 获取 'books-nc-50' 的文本特征 ---")
+    print("\n--- 示例1: 获取 'books-nc' 的文本特征 ---")
     text_embeddings = manager.get_embedding(
-        dataset_name="books-nc-50",
+        dataset_name="books-nc",
         modality="text",
         encoder_name="Qwen/Qwen2.5-VL-3B-Instruct",
         dimension=768
@@ -188,9 +188,9 @@ if __name__ == '__main__':
         print(f"成功获取文本特征，形状: {text_embeddings.shape}, 类型: {text_embeddings.dtype}")
 
     # 3. 查看嵌入向量的详细信息和预览
-    print("\n--- 示例2: 查看 'books-nc-50' 的多模态特征 ---")
+    print("\n--- 示例2: 查看 'books-nc' 的多模态特征 ---")
     manager.view_embedding(
-        dataset_name="books-nc-50",
+        dataset_name="books-nc",
         modality="multimodal",
         encoder_name="Qwen/Qwen2.5-VL-3B-Instruct",
         dimension=None  # 查看原生维度
