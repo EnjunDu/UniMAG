@@ -1,235 +1,152 @@
 # -*- coding: utf-8 -*-
 """
-模态检索 (Modality Retrieval)
+模态检索 (Modality Retrieval) 评估器
 
-此模块实现了在 "Tasks_and_arrangements.md" 中定义的两种模态检索方法：
-1. 传统方法: 使用一个查询嵌入从一个候选池中检索最相关的项目。
-2. MAG 特定方法: 使用一个节点的邻域增强嵌入在图中检索最相关的节点。
+此模块定义了 RetrievalEvaluator 类，用于执行模态检索评估任务。
+它遵循 "运行-训练-评估" 架构，并被 `run.py` 调用。
+核心功能是评估图增强嵌入在检索任务上的性能。
 """
 
 import sys
 from pathlib import Path
 import numpy as np
 import torch
-from typing import Optional, Tuple, Union, Dict, Any, List
-from torch_geometric.nn import GCNConv
 import torch.nn.functional as F
+from typing import Optional, Tuple, Dict, Any, List
 
-# 将项目根目录添加到Python路径中，以方便模块导入
+# 将项目根目录添加到Python路径中
 project_root = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from utils.embedding_manager import EmbeddingManager
 from utils.graph_loader import GraphLoader
-from src.model.models import GCN, GAT, GraphSAGE
 
-def retrieve_traditional(
-    query_embedding: np.ndarray,
-    candidate_pool: np.ndarray,
-    top_k: int = 10
-) -> np.ndarray:
+class RetrievalEvaluator:
     """
-    计算查询嵌入与候选池中所有嵌入的余弦相似度，并返回top_k个最相似的候选索引。
-
-    Args:
-        query_embedding (np.ndarray): 查询嵌入 (1D array)。
-        candidate_pool (np.ndarray): 候选嵌入池 (2D array, N x D)。
-        top_k (int): 要返回的最相似候选的数量。
-
-    Returns:
-        np.ndarray: 排序后的top_k个候选索引。
+    负责执行模态检索评估任务。
     """
-    query_tensor = torch.from_numpy(query_embedding).float().unsqueeze(0)
-    pool_tensor = torch.from_numpy(candidate_pool).float()
-
-    # 标准化嵌入
-    query_tensor = F.normalize(query_tensor, p=2, dim=1)
-    pool_tensor = F.normalize(pool_tensor, p=2, dim=1)
-
-    # 计算余弦相似度
-    similarity_scores = torch.matmul(query_tensor, pool_tensor.t()).squeeze(0)
-
-    # 获取 top_k 结果
-    _, top_k_indices = torch.topk(similarity_scores, k=top_k)
-
-    return top_k_indices.numpy()
-
-
-class MAGModalityRetriever:
-    """
-    实现 MAG 特定的、考虑图上下文的模态检索方法。
-    """
-    def __init__(self, gnn_model: torch.nn.Module, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Dict[str, Any], gnn_model: torch.nn.Module):
         """
-        初始化 MAG 特定的模态检索器。
+        初始化模态检索评估器。
 
         Args:
-            gnn_model (torch.nn.Module): 一个已经实例化的GNN模型。
-            config (Optional[Dict[str, Any]]): 包含任务和数据集配置的字典。
+            config (Dict[str, Any]): 包含任务和数据集配置的字典。
+            gnn_model (torch.nn.Module): 一个已经训练好的、可用于评估的GNN模型。
         """
         self.config = config
-        base_path = self.config.get('dataset', {}).get('data_root') if self.config else None
+        self.gnn_model = gnn_model
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.gnn_model.to(self.device)
+
+        # 从配置中获取嵌入的基础路径
+        base_path = self.config.get('dataset', {}).get('data_root')
         self.embedding_manager = EmbeddingManager(base_path=base_path)
         self.graph_loader = GraphLoader(config=self.config)
-        self.gnn_model = gnn_model
+        
+        # 从配置中获取评估参数
+        self.top_k_list = self.config.get('evaluation', {}).get('top_k', [1, 5, 10])
 
-    def _get_graph_structure(self, dataset_name: str) -> Optional[torch.Tensor]:
+    def _get_enhanced_embeddings(self) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """
-        使用 GraphLoader 获取真实的图结构。
+        使用GNN模型计算整个图的邻域增强嵌入。
         """
+        dataset_name = self.config['dataset']['name']
+        encoder_name = self.config['embedding']['encoder_name']
+        dimension = self.config['embedding']['dimension']
+
+        image_embeddings = self.embedding_manager.get_embedding(
+            dataset_name, "image", encoder_name, dimension
+        )
+        text_embeddings = self.embedding_manager.get_embedding(
+            dataset_name, "text", encoder_name, dimension
+        )
+
+        if image_embeddings is None or text_embeddings is None:
+            print("错误: 无法加载基础嵌入。")
+            return None
+
         try:
             graph_data = self.graph_loader.load_graph(dataset_name)
-            return graph_data.edge_index
+            edge_index = graph_data.edge_index.to(self.device)
         except (FileNotFoundError, ValueError) as e:
-            print(f"错误: 无法为数据集 '{dataset_name}' 加载图结构: {e}")
+            print(f"错误: 无法加载图结构: {e}")
             return None
 
-    def retrieve_mag_specific(
-        self,
-        dataset_name: str,
-        query_node_id: int,
-        encoder_name: str,
-        modality: str,
-        dimension: Optional[int] = None,
-        top_k: int = 10
-    ) -> Optional[np.ndarray]:
-        """
-        使用GCN增强的查询嵌入在图中检索top_k个最相似的节点。
+        multimodal_features = np.concatenate((text_embeddings, image_embeddings), axis=1)
+        features_tensor = torch.from_numpy(multimodal_features).float().to(self.device)
 
-        Args:
-            dataset_name (str): 数据集名称。
-            query_node_id (int): 查询节点的ID。
-            encoder_name (str): 编码器模型的Hugging Face名称。
-            modality (str): 要使用的嵌入类型 ('image', 'text', or 'multimodal')。
-            dimension (Optional[int]): 特征维度。
-            top_k (int): 要返回的最相似节点的数量。
+        self.gnn_model.eval()
+        with torch.no_grad():
+            _, enhanced_image_embeddings, enhanced_text_embeddings = self.gnn_model(features_tensor, edge_index)
+
+        return enhanced_image_embeddings.cpu().numpy(), enhanced_text_embeddings.cpu().numpy()
+
+    def evaluate(self) -> Dict[str, float]:
+        """
+        执行完整的图到文和文到图检索评估。
 
         Returns:
-            Optional[np.ndarray]: 排序后的top_k个节点ID。
+            Dict[str, float]: 包含评估指标的字典 (MRR, Hits@K)。
         """
-        # 1. 加载所有节点的嵌入
-        all_embeddings = self.embedding_manager.get_embedding(
-            dataset_name, modality, encoder_name, dimension
-        )
-        if all_embeddings is None:
-            print(f"错误: 无法加载 '{modality}' 嵌入。")
-            return None
-
-        # 2. 加载图结构
-        edge_index = self._get_graph_structure(dataset_name)
-        if edge_index is None:
-            return None
-
-        # 3. 创建邻域增强的查询嵌入
-        features_tensor = torch.from_numpy(all_embeddings).float()
+        print("--- 开始模态检索评估 ---")
         
-        # 使用注入的GNN模型
-        enhanced_features, _, _ = self.gnn_model(features_tensor, edge_index)
+        enhanced_embeddings = self._get_enhanced_embeddings()
+        if enhanced_embeddings is None:
+            print("评估失败，无法获取增强嵌入。")
+            return {"error": "Failed to get enhanced embeddings."}
+
+        image_embeds, text_embeds = enhanced_embeddings
         
-        query_embedding_enhanced = enhanced_features[query_node_id].detach().numpy()
-
-        # 4. 计算相似度并检索
-        # 从候选池中移除查询节点本身
-        candidate_indices = np.arange(all_embeddings.shape[0])
-        candidate_indices = np.delete(candidate_indices, query_node_id)
-        candidate_pool = all_embeddings[candidate_indices]
-
-        top_k_indices_in_candidates = retrieve_traditional(
-            query_embedding_enhanced,
-            candidate_pool,
-            top_k=top_k
-        )
+        # 计算文到图检索指标
+        print("正在执行文到图 (Text-to-Image) 检索...")
+        t2i_metrics = self._calculate_retrieval_metrics(text_embeds, image_embeds)
         
-        # 将候选索引映射回原始节点ID
-        top_k_node_ids = candidate_indices[top_k_indices_in_candidates]
-
-        return top_k_node_ids
-
-if __name__ == '__main__':
-    print("=== 模态检索模块使用示例 ===")
-
-    # --- 固定配置 ---
-    DATASET_NAME = "Grocery"
-    ENCODER_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
-    DIMENSION = 768
-    QUERY_NODE = 5
-    MODALITY = "text"  # 'image' or 'text'
-    TOP_K = 5
-    # 服务器上的固定数据根目录
-    DATA_ROOT = "/home/ai/MMAG"
-
-    # --- 初始化 ---
-    config = {
-        "dataset": {
-            "name": DATASET_NAME,
-            "data_root": DATA_ROOT
+        # 计算图到文检索指标
+        print("正在执行图到文 (Image-to-Text) 检索...")
+        i2t_metrics = self._calculate_retrieval_metrics(image_embeds, text_embeds)
+        
+        results = {
+            "text_to_image": t2i_metrics,
+            "image_to_text": i2t_metrics
         }
-    }
-    
-    # 1. 在外部实例化你想要的GNN模型
-    print("正在初始化GCN模型...")
-    gcn_model = GCN(
-        in_dim=DIMENSION, # 检索任务中，输入是单模态特征
-        hidden_dim=128,
-        num_layers=2,
-        dropout=0.5
-    )
-
-    # 2. 将模型实例注入到Retriever中
-    retriever = MAGModalityRetriever(gnn_model=gcn_model, config=config)
-    
-    # --- 加载数据 ---
-    print(f"正在从数据集 '{DATASET_NAME}' 加载 '{MODALITY}' 嵌入...")
-    all_embeddings = retriever.embedding_manager.get_embedding(
-        DATASET_NAME, MODALITY, ENCODER_NAME, DIMENSION
-    )
-
-    if all_embeddings is None:
-        print(f"错误: 无法加载 '{DATASET_NAME}' 的 '{MODALITY}' 嵌入。")
-        print(f"请确保文件存在: {DATA_ROOT}/{DATASET_NAME}/{MODALITY}_features/{DATASET_NAME}_{MODALITY}_{ENCODER_NAME}_{DIMENSION}d.npy")
-        sys.exit(1)
         
-    if QUERY_NODE >= len(all_embeddings):
-        print(f"错误: 查询节点 {QUERY_NODE} 超出范围 (0-{len(all_embeddings)-1})。")
-        sys.exit(1)
+        print("--- 模态检索评估完成 ---")
+        return results
 
-    # --- 示例 1: 传统检索 ---
-    print(f"\n--- 示例 1: 传统检索 (使用来自 '{DATASET_NAME}' 的真实数据) ---")
-    query_embedding = all_embeddings[QUERY_NODE]
-    
-    # 从候选池中移除查询节点本身
-    candidate_indices = np.arange(all_embeddings.shape[0])
-    candidate_indices = np.delete(candidate_indices, QUERY_NODE)
-    candidate_pool = all_embeddings[candidate_indices]
+    def _calculate_retrieval_metrics(self, queries: np.ndarray, candidates: np.ndarray) -> Dict[str, float]:
+        """
+        计算检索任务的核心指标 (MRR, Hits@K)。
 
-    top_k_indices_in_candidates = retrieve_traditional(
-        query_embedding,
-        candidate_pool,
-        top_k=TOP_K
-    )
-    
-    # 将候选索引映射回原始节点ID
-    top_k_node_ids_traditional = candidate_indices[top_k_indices_in_candidates]
-    print(f"传统检索 Top-{TOP_K} 节点 ID (对于节点 {QUERY_NODE}): {top_k_node_ids_traditional}")
+        Args:
+            queries (np.ndarray): 查询嵌入 (N x D)。
+            candidates (np.ndarray): 候选嵌入池 (N x D)。
 
-    # --- 示例 2: MAG 特定检索 ---
-    print(f"\n--- 示例 2: MAG 特定检索 ---")
-    print(f"正在为数据集 '{DATASET_NAME}' 的节点 {QUERY_NODE} 进行 MAG 特定检索...")
-    
-    top_nodes_mag = retriever.retrieve_mag_specific(
-        dataset_name=DATASET_NAME,
-        query_node_id=QUERY_NODE,
-        encoder_name=ENCODER_NAME,
-        modality=MODALITY,
-        dimension=DIMENSION,
-        top_k=TOP_K
-    )
+        Returns:
+            Dict[str, float]: 包含计算出的指标的字典。
+        """
+        num_queries = queries.shape[0]
+        ranks = np.zeros(num_queries)
+        
+        # 计算所有查询与所有候选之间的相似度矩阵
+        query_tensor = F.normalize(torch.from_numpy(queries).float(), p=2, dim=1)
+        candidate_tensor = F.normalize(torch.from_numpy(candidates).float(), p=2, dim=1)
+        sim_matrix = torch.matmul(query_tensor, candidate_tensor.t()).cpu().numpy()
 
-    if top_nodes_mag is not None:
-        print(f"成功检索到 Top-{TOP_K} 节点: {top_nodes_mag}")
-        # 比较两种方法的结果
-        print(f"\n--- 对比分析 (节点 {QUERY_NODE}) ---")
-        print(f"传统检索结果:   {top_k_node_ids_traditional}")
-        print(f"MAG 增强检索结果: {top_nodes_mag}")
-    else:
-        print("无法执行 MAG 特定检索。请检查嵌入文件和图结构。")
+        for i in range(num_queries):
+            # 对相似度进行排序，找到真实匹配项的排名
+            # 真实匹配项是索引为 i 的候选
+            sorted_indices = np.argsort(-sim_matrix[i, :])
+            rank = np.where(sorted_indices == i)[0][0] + 1
+            ranks[i] = rank
+            
+        # 计算 MRR
+        mrr = np.mean(1.0 / ranks)
+        
+        # 计算 Hits@K
+        hits_at_k = {}
+        for k in self.top_k_list:
+            hits = np.sum(ranks <= k)
+            hits_at_k[f"Hits@{k}"] = hits / num_queries
+            
+        metrics = {"MRR": mrr, **hits_at_k}
+        return {k: float(v) for k, v in metrics.items()}
