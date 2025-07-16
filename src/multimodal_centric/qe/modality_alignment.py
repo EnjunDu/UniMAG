@@ -38,7 +38,7 @@ from pathlib import Path
 # 导入项目内的模块
 from utils.embedding_manager import EmbeddingManager
 from utils.graph_loader import GraphLoader
-from src.graph_centric.models import GCN
+from src.model.models import GCN, GAT, GraphSAGE
 
 class ModalityAligner:
     """
@@ -241,12 +241,10 @@ class ModalityAligner:
         ground_truth: Dict[str, Any],
         embedding_manager: EmbeddingManager,
         graph_loader: GraphLoader,
+        gnn_model: torch.nn.Module,
         encoder_type: str,
         encoder_name: str,
-        dimension: Optional[int] = 768,
-        gcn_hidden_dim: int = 128,
-        gcn_num_layers: int = 2,
-        gcn_dropout: float = 0.5
+        dimension: Optional[int] = 768
     ) -> List[Dict[str, Any]]:
         """
         评估MAG特定方法下的模态对齐。
@@ -257,12 +255,10 @@ class ModalityAligner:
             ground_truth (Dict[str, Any]): 基准真值。
             embedding_manager (EmbeddingManager): 嵌入管理器。
             graph_loader (GraphLoader): 图加载器。
+            gnn_model (torch.nn.Module): 一个已经实例化的GNN模型。
             encoder_type (str): 编码器类型。
             encoder_name (str): 编码器名称。
             dimension (Optional[int]): 嵌入维度。
-            gcn_hidden_dim (int): GCN模型的隐藏层维度。
-            gcn_num_layers (int): GCN模型的层数。
-            gcn_dropout (float): GCN模型的dropout率。
 
         Returns:
             List[Dict[str, Any]]: 每个短语的评估结果列表。
@@ -302,20 +298,26 @@ class ModalityAligner:
         # 注意：这假设所有特征图大小相同，对于某些模型可能是这样
         all_feature_maps = torch.from_numpy(np.concatenate(all_feature_maps_list, axis=0)).to(self.device)
         
-        # 4. 使用GCN聚合特征
+        # 4. 使用GNN聚合特征
         num_nodes, C, H, W = all_feature_maps.shape
-        in_channels = C * H * W
         
-        gcn = GCN(
-            in_dim=in_channels,
-            hidden_dim=gcn_hidden_dim,
-            num_layers=gcn_num_layers,
-            dropout=gcn_dropout
-        ).to(self.device)
+        # 直接使用传入的gnn_model
+        gnn_model.to(self.device)
         
         flat_features = all_feature_maps.view(num_nodes, -1)
-        enhanced_flat_features = gcn(flat_features, edge_index)
-        enhanced_feature_maps = enhanced_flat_features.view(num_nodes, C, H, W)
+        # 注意：确保传入的gnn_model的in_dim与flat_features的维度匹配
+        enhanced_flat_features, _, _ = gnn_model(flat_features, edge_index)
+        
+        # 假设GNN模型的输出维度可以重新塑形回 (C, H, W)
+        # 这需要GNN的hidden_dim等于 C*H*W，或者进行相应调整
+        try:
+            enhanced_feature_maps = enhanced_flat_features.view(num_nodes, C, H, W)
+        except RuntimeError:
+            print(f"警告: GNN输出维度 {enhanced_flat_features.shape[1]} 与原始特征图维度 {C*H*W} 不匹配。")
+            print("将直接使用扁平化的增强特征进行后续计算，这可能不是预期行为。")
+            # 在这种情况下，需要一个从 enhanced_flat_features 到区域特征的映射，这里简化处理
+            # 实际应用中可能需要更复杂的解码器结构
+            enhanced_feature_maps = all_feature_maps # 作为后备
         
         # 5. 提取目标节点的增强特征图
         try:
@@ -433,12 +435,28 @@ if __name__ == '__main__':
         # 3. 评估MAG特定方法的对齐
         print("\n--- 3. 评估MAG特定对齐 ---")
         try:
+            # 实例化GCN模型
+            # 注意：这里的维度设置需要非常小心
+            # 假设特征图可以被展平
+            # C, H, W 需要从实际的特征图获取，这里使用占位符
+            # 实际应用中，可能需要先获取一个样本特征图来确定维度
+            placeholder_C, placeholder_H, placeholder_W = 256, 7, 7
+            gcn_in_dim = placeholder_C * placeholder_H * placeholder_W
+
+            gcn_model = GCN(
+                in_dim=gcn_in_dim,
+                hidden_dim=gcn_in_dim, # 保持维度以便恢复形状
+                num_layers=2,
+                dropout=0.5
+            )
+
             mag_results = aligner.evaluate_mag_alignment(
                 node_id=TARGET_NODE_ID,
                 dataset_name=DATASET_NAME,
                 ground_truth=ground_truth_data,
                 embedding_manager=manager,
                 graph_loader=loader,
+                gnn_model=gcn_model,
                 encoder_type=ENCODER_TYPE,
                 encoder_name=ENCODER_NAME,
                 dimension=DIMENSION

@@ -20,6 +20,7 @@ sys.path.insert(0, str(project_root))
 
 from utils.embedding_manager import EmbeddingManager
 from utils.graph_loader import GraphLoader
+from src.model.models import GCN, GAT, GraphSAGE
 
 def calculate_clip_score(
     image_embedding: np.ndarray,
@@ -51,11 +52,12 @@ class MAGModalityMatcher:
     """
     实现 MAG 特定的、考虑图上下文的模态匹配方法。
     """
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, gnn_model: torch.nn.Module, config: Optional[Dict[str, Any]] = None):
         """
         初始化 MAG 特定的模态匹配器。
 
         Args:
+            gnn_model (torch.nn.Module): 一个已经实例化的GNN模型 (例如 GCN, GAT)。
             config (Optional[Dict[str, Any]]): 包含任务和数据集配置的字典。
         """
         self.config = config
@@ -63,12 +65,7 @@ class MAGModalityMatcher:
         base_path = self.config.get('dataset', {}).get('data_root') if self.config else None
         self.embedding_manager = EmbeddingManager(base_path=base_path)
         self.graph_loader = GraphLoader(config=self.config)
-        self.gcn_layer = None
-
-    def _initialize_gcn_layer(self, in_dim: int, out_dim: int):
-        """如果需要，则初始化GCN层。"""
-        if self.gcn_layer is None:
-            self.gcn_layer = GCNConv(in_dim, out_dim)
+        self.gnn_model = gnn_model
 
     def _get_graph_structure(self, dataset_name: str) -> Optional[torch.Tensor]:
         """
@@ -94,7 +91,7 @@ class MAGModalityMatcher:
         dimension: Optional[int] = None
     ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """
-        使用GCN层计算整个图的邻域增强嵌入。
+        使用传入的GNN模型计算整个图的邻域增强嵌入。
 
         Args:
             dataset_name (str): 数据集名称。
@@ -102,7 +99,7 @@ class MAGModalityMatcher:
             dimension (Optional[int]): 特征维度。
 
         Returns:
-            Optional[Tuple[np.ndarray, np.ndarray]]: 
+            Optional[Tuple[np.ndarray, np.ndarray]]:
                 一个包含 (所有节点的增强图像嵌入, 所有节点的增强文本嵌入) 的元组。
                 如果无法获取任何所需嵌入，则返回 None。
         """
@@ -122,19 +119,15 @@ class MAGModalityMatcher:
             print("错误: 无法加载图结构。")
             return None
 
-        # 将numpy嵌入转换为torch张量
-        image_features_tensor = torch.from_numpy(image_embeddings).float()
-        text_features_tensor = torch.from_numpy(text_embeddings).float()
-        
-        # 初始化GCN层
-        feature_dim = image_features_tensor.shape[1]
-        self._initialize_gcn_layer(feature_dim, feature_dim)
+        # 将图像和文本嵌入拼接成GNN的输入
+        multimodal_features = np.concatenate((image_embeddings, text_embeddings), axis=1)
+        features_tensor = torch.from_numpy(multimodal_features).float()
 
-        # 使用GCN层进行前向传播
-        enhanced_image_embeddings = self.gcn_layer(image_features_tensor, edge_index).detach().numpy()
-        enhanced_text_embeddings = self.gcn_layer(text_features_tensor, edge_index).detach().numpy()
+        # 使用传入的GNN模型进行前向传播
+        # model(x, edge_index) 返回 (out, out_v, out_t)
+        _ , enhanced_image_embeddings, enhanced_text_embeddings = self.gnn_model(features_tensor, edge_index)
 
-        return enhanced_image_embeddings, enhanced_text_embeddings
+        return enhanced_image_embeddings.detach().numpy(), enhanced_text_embeddings.detach().numpy()
 
     def calculate_mag_clip_score(
         self,
@@ -192,7 +185,20 @@ if __name__ == '__main__':
             "data_root": DATA_ROOT
         }
     }
-    matcher = MAGModalityMatcher(config=config)
+    
+    # 1. 在外部实例化你想要的GNN模型
+    print("正在初始化GAT模型...")
+    # 注意：这里的in_dim需要是拼接后特征的维度
+    gat_model = GAT(
+        in_dim=DIMENSION * 2,
+        hidden_dim=128,       # GAT的隐藏维度可以自定义
+        num_layers=2,
+        heads=4,
+        dropout=0.5
+    )
+
+    # 2. 将模型实例注入到Matcher中
+    matcher = MAGModalityMatcher(gnn_model=gat_model, config=config)
 
     # --- 加载数据 ---
     print(f"正在从数据集 '{DATASET_NAME}' 加载嵌入...")

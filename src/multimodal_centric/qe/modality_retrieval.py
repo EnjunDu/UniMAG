@@ -21,6 +21,7 @@ sys.path.insert(0, str(project_root))
 
 from utils.embedding_manager import EmbeddingManager
 from utils.graph_loader import GraphLoader
+from src.model.models import GCN, GAT, GraphSAGE
 
 def retrieve_traditional(
     query_embedding: np.ndarray,
@@ -58,23 +59,19 @@ class MAGModalityRetriever:
     """
     实现 MAG 特定的、考虑图上下文的模态检索方法。
     """
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, gnn_model: torch.nn.Module, config: Optional[Dict[str, Any]] = None):
         """
         初始化 MAG 特定的模态检索器。
 
         Args:
+            gnn_model (torch.nn.Module): 一个已经实例化的GNN模型。
             config (Optional[Dict[str, Any]]): 包含任务和数据集配置的字典。
         """
         self.config = config
         base_path = self.config.get('dataset', {}).get('data_root') if self.config else None
         self.embedding_manager = EmbeddingManager(base_path=base_path)
         self.graph_loader = GraphLoader(config=self.config)
-        self.gcn_layer = None
-
-    def _initialize_gcn_layer(self, in_dim: int, out_dim: int):
-        """如果需要，则初始化GCN层。"""
-        if self.gcn_layer is None:
-            self.gcn_layer = GCNConv(in_dim, out_dim)
+        self.gnn_model = gnn_model
 
     def _get_graph_structure(self, dataset_name: str) -> Optional[torch.Tensor]:
         """
@@ -125,12 +122,11 @@ class MAGModalityRetriever:
 
         # 3. 创建邻域增强的查询嵌入
         features_tensor = torch.from_numpy(all_embeddings).float()
-        feature_dim = features_tensor.shape[1]
-        self._initialize_gcn_layer(feature_dim, feature_dim)
         
-        enhanced_features = self.gcn_layer(features_tensor, edge_index).detach()
+        # 使用注入的GNN模型
+        enhanced_features, _, _ = self.gnn_model(features_tensor, edge_index)
         
-        query_embedding_enhanced = enhanced_features[query_node_id].numpy()
+        query_embedding_enhanced = enhanced_features[query_node_id].detach().numpy()
 
         # 4. 计算相似度并检索
         # 从候选池中移除查询节点本身
@@ -169,7 +165,18 @@ if __name__ == '__main__':
             "data_root": DATA_ROOT
         }
     }
-    retriever = MAGModalityRetriever(config=config)
+    
+    # 1. 在外部实例化你想要的GNN模型
+    print("正在初始化GCN模型...")
+    gcn_model = GCN(
+        in_dim=DIMENSION, # 检索任务中，输入是单模态特征
+        hidden_dim=128,
+        num_layers=2,
+        dropout=0.5
+    )
+
+    # 2. 将模型实例注入到Retriever中
+    retriever = MAGModalityRetriever(gnn_model=gcn_model, config=config)
     
     # --- 加载数据 ---
     print(f"正在从数据集 '{DATASET_NAME}' 加载 '{MODALITY}' 嵌入...")
