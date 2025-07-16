@@ -53,10 +53,24 @@ def load_data(graph_path, v_emb_path, t_emb_path, val_ratio=0.1, test_ratio=0.2,
     if self_loop:
         graph = graph.remove_self_loop().add_self_loop()
     # 嵌入、标签
-    v_x = torch.load(v_emb_path)
-    t_x = torch.load(t_emb_path)
+    # v_x = torch.load(v_emb_path)
+    # t_x = torch.load(t_emb_path)
+        # 嵌入、标签
+    # v_x = torch.load(v_emb_path)
+    # t_x = torch.load(t_emb_path)
+    v_x = torch.from_numpy(np.load(v_emb_path)).to(torch.float32)
+    t_x = torch.from_numpy(np.load(t_emb_path)).to(torch.float32)
+    max_val_v = torch.finfo(v_x.dtype).max  # 获取该数据类型最大有限值
+    min_val_v = torch.finfo(v_x.dtype).min  # 获取最小有限值
+    max_val_t = torch.finfo(t_x.dtype).max  # 获取该数据类型最大有限值
+    min_val_t = torch.finfo(t_x.dtype).min  # 获取最小有限值
+    v_x = torch.nan_to_num(v_x, nan=0.0, posinf=max_val_v, neginf=min_val_v)
+    t_x = torch.nan_to_num(t_x, nan=0.0, posinf=max_val_t, neginf=min_val_t)
     x = torch.cat([v_x, t_x], dim=1)
-    # x = v_x
+    print("输入数据统计:")
+    print(f"Min: {x.min()}, Max: {x.max()}, Mean: {x.mean()}, Std: {x.std()}")
+    print(f"NaN in x: {torch.isnan(x).any()}, Inf in x: {torch.isinf(x).any()}")
+    print(x.shape)
     # 划分数据集
     edge_split = split_edge(graph, val_ratio=val_ratio, test_ratio=test_ratio, num_neg=num_neg, path=path)
 
@@ -69,6 +83,22 @@ def load_data(graph_path, v_emb_path, t_emb_path, val_ratio=0.1, test_ratio=0.2,
     src, dst = graph.edges()
     edge_index = torch.stack([src, dst], dim=0)
     return Data(x=x, v_dim=v_x.size(1), t_dim=t_x.size(1), edge_split=edge_split, adj_t=edge_index)
+
+class Linear_v_t(nn.Module):
+    def __init__(self, in_channels, out_channels_v, out_channels_t):
+        super(Linear_v_t, self).__init__()
+
+        self.v = nn.Linear(in_channels, out_channels_v)
+        self.t = nn.Linear(in_channels, out_channels_t)
+
+    def reset_parameters(self):
+        self.v.reset_parameters()
+        self.t.reset_parameters()
+
+    def forward(self, x_v, x_t):
+        out_v = self.v(x_v)
+        out_t = self.t(x_t)
+        return out_v, out_t
 
 class LinkPredictor(nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, num_layers, dropout):
@@ -117,7 +147,7 @@ def evaluate(model, predictor, x, adj_t, edge_split, num_neg=1000, k_list=[1,3,1
     neg_target_edge = edge_split['valid']['target_node_neg'].to(x.device)  # [num_pos, num_neg]
 
     # 获取节点的嵌入
-    emb = model(x, adj_t)
+    emb, out_v, out_t = model(x, adj_t)
 
     # 分批计算正样本得分
     pos_preds = []
@@ -165,7 +195,7 @@ def test(model, predictor, x, adj_t, edge_split, num_neg=1000, k_list=[1,3,10], 
     neg_target_edge = edge_split['test']['target_node_neg'].to(x.device)  # [num_pos, num_neg]
 
     # 获取节点的嵌入
-    emb = model(x, adj_t)
+    emb, out_v, out_t = model(x, adj_t)
 
     # 分批计算正样本得分
     pos_preds = []
@@ -202,18 +232,45 @@ def test(model, predictor, x, adj_t, edge_split, num_neg=1000, k_list=[1,3,10], 
     mrr = (1.0 / ranks.float()).mean().item()
     
     return {**hits_results, 'MRR': mrr}
-def train(model, predictor, x, adj_t, edge_split, optimizer, batch_size):
+
+def infoNCE_loss(out, orig_features, tau=0.07):
+    """
+    InfoNCE损失实现
+    - out: 模型输出的特征嵌入 (batch_size, emb_dim)
+    - orig_features: 原始特征 (batch_size, feat_dim)
+    - tau: 温度系数
+    """
+    # 1. 特征归一化
+    out_norm = F.normalize(out, p=2, dim=1)
+    orig_norm = F.normalize(orig_features, p=2, dim=1)
+    
+    # 2. 计算相似度矩阵
+    sim_matrix = torch.mm(out_norm, orig_norm.t()) / tau  # [batch_size, batch_size]
+    
+    # 3. 创建标签（对角线为正样本）
+    labels = torch.arange(sim_matrix.size(0), device=sim_matrix.device)
+    
+    # 4. 使用交叉熵损失
+    loss = F.cross_entropy(sim_matrix, labels)
+    
+    return loss
+
+def train(model, predictor, data, config, x, adj_t, edge_split, optimizer, batch_size):
 
     model.train()
     predictor.train()
-
+    linear_v_t = Linear_v_t(config.model.hidden_dim, data.v_dim, data.t_dim).to(config.device)
+    linear_v_t.train()
     source_edge = edge_split['train']['source_node']
     target_edge = edge_split['train']['target_node']
 
     total_loss = total_examples = 0
     for batch in DataLoader(range(source_edge.size(0)), batch_size, shuffle=True):
         optimizer.zero_grad()
-        emb = model(x, adj_t)
+        emb, out_v, out_t = model(x, adj_t)
+        out_v, out_t = linear_v_t(out_v, out_t)
+        loss_v = infoNCE_loss(out_v, data.x[:, :data.v_dim])
+        loss_t = infoNCE_loss(out_t, data.x[:, data.v_dim:])
 
         pos_out = predictor(emb[source_edge[batch]], emb[target_edge[batch]])
         pos_loss = -torch.log(pos_out + 1e-15).mean()
@@ -223,7 +280,7 @@ def train(model, predictor, x, adj_t, edge_split, optimizer, batch_size):
         neg_out = predictor(emb[source_edge[batch]], emb[dst_neg])
         neg_loss = -torch.log(1 - neg_out + 1e-15).mean()
 
-        loss = pos_loss + neg_loss
+        loss = pos_loss + neg_loss + config.task.lambda_v * loss_v + config.task.lambda_t * loss_t
         loss.backward()
         optimizer.step()
 
@@ -243,7 +300,7 @@ def run_lp(config):
     if config.model.name =="MLP":
         encoder = MLP(in_dim=data.x.size(1), hidden_dim=config.model.hidden_dim, num_layers=config.model.num_layers, dropout=config.model.dropout)
     elif config.model.name =="GAT":
-        encoder = GAT(in_dim=data.x.size(1), hidden_dim=config.model.hidden_dim, num_layers=config.model.num_layers, heads=config.model.heads, dropout=config.model.dropout)
+        encoder = GAT(in_dim=data.x.size(1), hidden_dim=config.model.hidden_dim, num_layers=config.model.num_layers, heads=config.model.heads, dropout=config.model.dropout, att_dropout=config.model.att_dropout)
     elif config.model.name =="GCN":
         encoder = GCN(in_dim=data.x.size(1), hidden_dim=config.model.hidden_dim, num_layers=config.model.num_layers, dropout=config.model.dropout)
     elif config.model.name =="GraphSAGE":
@@ -285,7 +342,7 @@ def run_lp(config):
         predictor.reset_parameters() if hasattr(predictor, 'reset_parameters') else None
         # 训练
         for epoch in range(config.task.n_epochs):
-            train_loss = train(encoder, predictor, data.x, data.adj_t, data.edge_split, optimizer, batch_size=config.task.batch_size)
+            train_loss = train(encoder, predictor, data, config, data.x, data.adj_t, data.edge_split, optimizer, batch_size=config.task.batch_size)
             print(f"[Run {run+1}] Epoch {epoch+1} | Train Loss: {train_loss:.4f}")
             if epoch % 1 == 0:
                 results = evaluate(encoder, predictor, data.x, data.adj_t, data.edge_split, config.dataset.num_neg, k_list=config.task.k_list)

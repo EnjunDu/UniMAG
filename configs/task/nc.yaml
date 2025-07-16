@@ -1,10 +1,14 @@
 name: nc
-n_epochs: 300
-lr: 0.0005
+n_epochs: 1000
+lr: 5e-3
 fewshots: False
 weight_decay: 1e-5
-n_runs: 3
+n_runs: 1
 self_loop: True
 undirected: True
 num_neighbors: 15
 batch_size: 512
+lambda_v: 0.5
+lambda_t: 0.5
+num_neg_samples: 5
+label_smoothing: 0.1

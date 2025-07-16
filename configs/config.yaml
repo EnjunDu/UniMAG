@@ -1,5 +1,5 @@
 defaults:
-  - task: lp
+  - task: nc
   - model: gcn
   - dataset: default
   - _self_

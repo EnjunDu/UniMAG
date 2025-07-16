@@ -4,7 +4,7 @@ v_emb_path: /home/ai/lys/MAG/MAGB-master/dataset/books-nc/t5vit_feat.pt
 t_emb_path: /home/ai/lys/MAG/MAGB-master/dataset/books-nc/t5vit_feat.pt
 train_ratio: 0.6
 val_ratio: 0.2
-lp_val_ratio: 0.01
-lp_test_ratio: 0.08
+lp_val_ratio: 0.1
+lp_test_ratio: 0.2
 edge_split_path: None
 num_neg: 1000

@@ -1,0 +1,13 @@
+name: gc
+n_epochs: 200
+lr: 0.0005
+fewshots: False
+weight_decay: 1e-5
+n_runs: 3
+self_loop: True
+undirected: True
+num_neighbors: 15
+batch_size: 200
+train_ratio: 0.8
+val_ratio: 0.1
+num_classes: 2

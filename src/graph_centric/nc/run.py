@@ -38,10 +38,21 @@ def load_data(graph_path, v_emb_path, t_emb_path, train_ratio, val_ratio, fewsho
     src, dst = graph.edges()
     edge_index = torch.stack([src, dst], dim=0)
     # 嵌入、标签
-    v_x = torch.load(v_emb_path)
-    t_x = torch.load(t_emb_path)
+    # v_x = torch.load(v_emb_path)
+    # t_x = torch.load(t_emb_path)
+    v_x = torch.from_numpy(np.load(v_emb_path)).to(torch.float32)
+    t_x = torch.from_numpy(np.load(t_emb_path)).to(torch.float32)
+    max_val_v = torch.finfo(v_x.dtype).max  # 获取该数据类型最大有限值
+    min_val_v = torch.finfo(v_x.dtype).min  # 获取最小有限值
+    max_val_t = torch.finfo(t_x.dtype).max  # 获取该数据类型最大有限值
+    min_val_t = torch.finfo(t_x.dtype).min  # 获取最小有限值
+    v_x = torch.nan_to_num(v_x, nan=0.0, posinf=max_val_v, neginf=min_val_v)
+    t_x = torch.nan_to_num(t_x, nan=0.0, posinf=max_val_t, neginf=min_val_t)
     x = torch.cat([v_x, t_x], dim=1)
-    # x = v_x
+    print("输入数据统计:")
+    print(f"Min: {x.min()}, Max: {x.max()}, Mean: {x.mean()}, Std: {x.std()}")
+    print(f"NaN in x: {torch.isnan(x).any()}, Inf in x: {torch.isinf(x).any()}")
+    print(x.shape)
     y = graph.ndata["label"]
     # 划分数据集
     if "train_mask" in graph.ndata:
@@ -66,19 +77,23 @@ class NodeClassifier(nn.Module):
 
 class GNNModel(nn.Module):
     # 嵌入+分类头
-    def __init__(self, encoder, classifier):
+    def __init__(self, encoder, classifier, dim_hidden, dim_v, dim_t):
         super().__init__()
         self.encoder = encoder
         self.classifier = classifier
+        self.decoder_v = nn.Linear(dim_hidden, dim_v)
+        self.decoder_t = nn.Linear(dim_hidden, dim_t)
 
     def reset_parameters(self):
         self.encoder.reset_parameters()
         self.classifier.reset_parameters()
 
     def forward(self, x, edge_index):
-        x = self.encoder(x, edge_index)
+        x, x_v, x_t = self.encoder(x, edge_index)
         out = self.classifier(x)
-        return out
+        out_v = self.decoder_v(x_v)
+        out_t = self.decoder_t(x_t)
+        return out, out_v, out_t
 
 def set_seed(seed: int):
     # random.seed(seed)
@@ -133,11 +148,34 @@ def calculate_f1(preds: torch.Tensor, labels: torch.Tensor, num_classes: int) ->
 @torch.no_grad()
 def evaluate(model, data, mask, num_classes):
     model.eval()
-    out = model(data.x, data.edge_index)
+    out, out_v, out_t = model(data.x, data.edge_index)
     pred = out.argmax(dim=1)
     correct = (pred[mask] == data.y[mask]).sum()
     f1 = calculate_f1(pred[mask], data.y[mask],  num_classes)
     return f1, correct.item() / mask.sum().item() if mask.sum() > 0 else 0.0
+
+
+def infoNCE_loss(out, orig_features, tau=0.07):
+    """
+    InfoNCE损失实现
+    - out: 模型输出的特征嵌入 (batch_size, emb_dim)
+    - orig_features: 原始特征 (batch_size, feat_dim)
+    - tau: 温度系数
+    """
+    # 1. 特征归一化
+    out_norm = F.normalize(out, p=2, dim=1)
+    orig_norm = F.normalize(orig_features, p=2, dim=1)
+    
+    # 2. 计算相似度矩阵
+    sim_matrix = torch.mm(out_norm, orig_norm.t()) / tau  # [batch_size, batch_size]
+    
+    # 3. 创建标签（对角线为正样本）
+    labels = torch.arange(sim_matrix.size(0), device=sim_matrix.device)
+    
+    # 4. 使用交叉熵损失
+    loss = F.cross_entropy(sim_matrix, labels)
+    
+    return loss
 
 def train_and_eval(config, model, data, run_id=0):
     model.reset_parameters() if hasattr(model, 'reset_parameters') else None
@@ -145,7 +183,7 @@ def train_and_eval(config, model, data, run_id=0):
     data = data.to(config.device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.task.lr, weight_decay=config.task.weight_decay)
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(label_smoothing=config.task.label_smoothing)
 
     best_val_acc = 0
     best_val_f1 = 0
@@ -154,9 +192,15 @@ def train_and_eval(config, model, data, run_id=0):
 
     for epoch in range(config.task.n_epochs):
         model.train()
-        out = model(data.x, data.edge_index)
-        loss = criterion(out[data.train_mask], data.y[data.train_mask])
-        print(loss)
+        out, out_v, out_t = model(data.x, data.edge_index)
+        loss_task = criterion(out[data.train_mask], data.y[data.train_mask])
+        loss_v = infoNCE_loss(out_v[data.train_mask], data.x[data.train_mask, :data.v_dim])
+        loss_t = infoNCE_loss(out_t[data.train_mask], data.x[data.train_mask, data.v_dim:])
+        # print(loss_v)
+        # # 总损失：任务损失 + 加权的对比损失
+        
+        loss = loss_task + config.task.lambda_v * loss_v + config.task.lambda_t * loss_t
+        # print(loss)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -187,7 +231,7 @@ def run_nc(config):
     if config.model.name =="MLP":
         encoder = MLP(in_dim=data.x.size(1), hidden_dim=config.model.hidden_dim, num_layers=config.model.num_layers, dropout=config.model.dropout)
     elif config.model.name =="GAT":
-        encoder = GAT(in_dim=data.x.size(1), hidden_dim=config.model.hidden_dim, num_layers=config.model.num_layers, heads=config.model.heads, dropout=config.model.dropout)
+        encoder = GAT(in_dim=data.x.size(1), hidden_dim=config.model.hidden_dim, num_layers=config.model.num_layers, heads=config.model.heads, dropout=config.model.dropout, att_dropout=config.model.att_dropout)
     elif config.model.name =="GCN":
         encoder = GCN(in_dim=data.x.size(1), hidden_dim=config.model.hidden_dim, num_layers=config.model.num_layers, dropout=config.model.dropout)
     elif config.model.name =="GraphSAGE":
@@ -217,7 +261,7 @@ def run_nc(config):
         )
         config.model.hidden_dim = config.model.hidden_dim * config.model.num_layers
     classifier = NodeClassifier(in_dim=config.model.hidden_dim, num_classes=num_classes)
-    model = GNNModel(encoder, classifier)
+    model = GNNModel(encoder, classifier, config.model.hidden_dim, data.v_dim, data.t_dim)
     # 3.训练 & 测试
     accs = []
     f1s = []
