@@ -9,7 +9,7 @@
 import sys
 from pathlib import Path
 import numpy as np
-from typing import Optional, Union, List, Any
+from typing import Optional, Union, List, Any,Dict
 from PIL.Image import Image
 
 # 将项目根目录添加到Python路径中
