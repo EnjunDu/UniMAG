@@ -183,7 +183,7 @@ Design:
 
 ##### Task Arrangement
 
-**Target Task**: Similar to *G2Text*, but aimed at generating images from Multimodal Attributed Graphs (MMAGs).【Zhenning Zhang】
+**Target Task**: Similar to *G2Text*, but aimed at generating images from Multimodal Attributed Graphs (MMAGs).
 
 - **Reference**: [Multimodal Graph-to-Image Generation with Graph Context-Conditioned Diffusion Models (arXiv:2410.07157)](https://arxiv.org/abs/2410.07157?utm_source=chatgpt.com)
 - **Motivation**: This task aims to generate images conditioned on structured multimodal graph data. The referenced method introduces a *Graph Context-Conditioned Diffusion Model* to handle the complexity of graph structures and multimodal attributes.
@@ -199,36 +199,16 @@ Design:
 
 ##### **2. Fusion of Embeddings and Prompts**
 
-To simplify the integration process, we use a basic concatenation method to merge the embeddings from multiple modalities.
-
-- **Concatenated Embeddings**: Combine the image embedding vector, text embedding vector, and the prompt embedding into a single unified vector.
-  - Example: [image_embedding ; text_embedding ; prompt_embedding] This joint embedding serves as the input condition for the downstream generation model.
-  
+We are currently exploring how to convert multimodal embeddings into a form that can be read and processed by large models. 
 
 ##### **3. Generation Model Design**
 
-- **Model Choice**: Use a lightweight image generator (or possibly a generative LLM with visual capabilities) conditioned on the concatenated embeddings.
+- **Model Choice**: Use a large model capable of generating images to receive the pre-processed embeddings and prompts for image generation.
 
   - **Input**: Combined embedding vector (image + text + prompt)
   - **Output**: A generated image that reflects both the semantic content and visual cues of the input embeddings
-  
 
-##### **4. Loss Function**
-
-- **To Be Explored**: At present, a standard image generation loss (e.g., pixel-wise reconstruction loss, adversarial loss) can be used. Further study on loss formulations specific to MMAGs is needed.
-
-##### **5. Training and Evaluation**
-
-- **Training**: Train the image generator (and optionally a discriminator) using the fused multimodal embeddings. GAN-based strategies may be employed if realism is a key goal.
-
-- **Evaluation**: Image quality can be assessed via:
-
-  - Human evaluation (subjective visual inspection)
-  - Automated metrics (e.g., FID, CLIPScore)
-  - LLM-based assessment (e.g., prompt-image alignment scoring using GPT-4V or similar)
-
-  
-
+    
 
 - MAG-specific【Modality-level】graph (image) + text [prompt] → image 【GT2Image】【Sicheng LIU】
 
