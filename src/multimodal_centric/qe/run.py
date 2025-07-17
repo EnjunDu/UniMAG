@@ -14,6 +14,8 @@ import yaml
 from pathlib import Path
 import sys
 import os
+from collections import OrderedDict
+import json
 
 # 将项目根目录添加到Python路径中
 project_root = Path(__file__).resolve().parent.parent.parent.parent
@@ -23,6 +25,15 @@ from src.multimodal_centric.qe.trainer import GNNTrainer
 from src.multimodal_centric.qe.modality_matching import MatchingEvaluator
 from src.multimodal_centric.qe.modality_retrieval import RetrievalEvaluator
 from src.multimodal_centric.qe.modality_alignment import AlignmentEvaluator
+
+def convert_ordereddict_to_dict(d):
+    """递归地将OrderedDict转换为dict，以便美观地打印。"""
+    if isinstance(d, OrderedDict):
+        d = dict(d)
+    if isinstance(d, dict):
+        for key, value in d.items():
+            d[key] = convert_ordereddict_to_dict(value)
+    return d
 
 def main():
     """主函数，作为整个QE任务的入口。"""
@@ -76,10 +87,13 @@ def main():
     # 4. 运行评估
     print("\n--- 步骤 4: 开始评估 ---")
     results = evaluator.evaluate()
+    
+    # 在打印前将所有OrderedDict转换为dict
+    results_dict = convert_ordereddict_to_dict(results)
 
     print("\n--- 评估完成 ---")
     print("最终结果:")
-    print(yaml.dump(results, indent=2))
+    print(yaml.dump(results_dict, indent=2, default_flow_style=False))
 
 if __name__ == '__main__':
     main()

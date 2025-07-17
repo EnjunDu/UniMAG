@@ -12,6 +12,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from typing import Dict, Any
+from collections import OrderedDict
 
 # 将项目根目录添加到Python路径中
 project_root = Path(__file__).resolve().parent.parent.parent.parent
@@ -28,7 +29,7 @@ class RetrievalEvaluator(BaseEvaluator):
         初始化模态检索评估器。
         """
         super().__init__(config, gnn_model)
-        self.top_k_list = self.config.get('evaluation', {}).get('top_k', [1, 5, 10])
+        self.top_k_list = sorted(self.config.get('evaluation', {}).get('top_k', [1, 5, 10]))
 
     def evaluate(self) -> Dict[str, float]:
         """
@@ -75,10 +76,11 @@ class RetrievalEvaluator(BaseEvaluator):
             
         mrr = np.mean(1.0 / ranks)
         
-        hits_at_k = {}
+        metrics = OrderedDict()
+        metrics["MRR"] = float(mrr)
+        
         for k in self.top_k_list:
             hits = np.sum(ranks <= k)
-            hits_at_k[f"Hits@{k}"] = hits / num_queries
+            metrics[f"Hits@{k}"] = float(hits / num_queries)
             
-        metrics = {"MRR": mrr, **hits_at_k}
-        return {k: float(v) for k, v in metrics.items()}
+        return metrics
