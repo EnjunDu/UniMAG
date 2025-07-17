@@ -27,6 +27,7 @@ class UniMultimodalGraph(Dataset):
         else:
             node_map = torch.load(os.path.join(self.datadir,'node_mapping.pt'))
             node_2_asin = {v:k for k,v in sorted(node_map.items(),key=lambda item:item[1])}
+        self.node_2_asin = node_2_asin
 
         node_id_path = os.path.join(self.datadir,'node_ids.json')
         with open(node_id_path,'r',encoding='utf-8') as f:
@@ -63,7 +64,7 @@ class UniMultimodalGraph(Dataset):
     
     @property
     def processed_file_names(self):
-        return ["geometric_data_processed.pt"]
+        return ["geometric_data_processed.pt","node_2_asin.pt"]
     
     def download(self):
         '''
@@ -83,4 +84,5 @@ class UniMultimodalGraph(Dataset):
 
         print('Saving data……')
         torch.save(data_with_embs,self.processed_paths[0])
+        torch.save(self.node_2_asin,self.processed_paths[1])
         
