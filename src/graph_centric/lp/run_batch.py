@@ -25,6 +25,7 @@ def split_edge(graph, val_ratio=0.2, test_ratio=0.2, num_neg=150, path=None):
         edges = torch.randperm(graph.num_edges()) 
 
         source, target = graph.edges()
+
         val_size = int(len(edges) * val_ratio)
         test_size = int(len(edges) * test_ratio)
         test_source, test_target = source[edges[:test_size]], target[edges[:test_size]]
@@ -52,6 +53,9 @@ def load_data(graph_path, v_emb_path, t_emb_path, val_ratio=0.1, test_ratio=0.2,
         graph = dgl.add_reverse_edges(graph)
     if self_loop:
         graph = graph.remove_self_loop().add_self_loop()
+    # 嵌入、标签
+    # v_x = torch.load(v_emb_path)
+    # t_x = torch.load(t_emb_path)
         # 嵌入、标签
     # v_x = torch.load(v_emb_path)
     # t_x = torch.load(t_emb_path)
@@ -252,13 +256,12 @@ def infoNCE_loss(out, orig_features, tau=0.07):
     
     return loss
 
-def train(model, predictor, data, config, adj_t, edge_split, optimizer, batch_size, num_neighbors):
+def train(model, predictor, data, config, x, adj_t, edge_split, optimizer, batch_size):
 
     model.train()
     predictor.train()
     linear_v_t = Linear_v_t(config.model.hidden_dim, data.v_dim, data.t_dim).to(config.device)
     linear_v_t.train()
-
     train_edge_index = torch.stack([
         edge_split['train']['source_node'],
         edge_split['train']['target_node']
@@ -267,37 +270,50 @@ def train(model, predictor, data, config, adj_t, edge_split, optimizer, batch_si
         data=data,
         edge_label_index=train_edge_index,
         edge_label=torch.ones(train_edge_index.size(1)),  # 正样本标签
-        num_neighbors=[15,15],#num_neighbors,
+        num_neighbors=config.task.num_neighbors,#[15,15],#num_neighbors,
         batch_size=batch_size,
         shuffle=True,
-        neg_sampling_ratio=1.0,  # 负样本比例 (1:1)
+        neg_sampling_ratio=0.0,  # 负样本比例 (1:1)
     )
     total_loss = total_examples = 0
     for subgraph in loader:
         optimizer.zero_grad()
         
-        # 移动到设备（如果使用GPU）
-        subgraph = subgraph.to("cuda")
+        # 移动到设备（GPU）
+        subgraph = subgraph.to(config.device)
         
+        # 1. 计算子图节点嵌入
         emb, out_v, out_t = model(subgraph.x, subgraph.edge_index)
         out_v, out_t = linear_v_t(out_v, out_t)
         loss_v = infoNCE_loss(out_v, subgraph.x[:, :data.v_dim])
         loss_t = infoNCE_loss(out_t, subgraph.x[:, data.v_dim:])
-        # 获取当前批次的边（正负样本）
+        # 2. 获取当前批次的正样本边
         src, dst = subgraph.edge_label_index
-        edge_label = subgraph.edge_label
+        num_pos = src.size(0)
+        # 3. 计算正样本预测得分
+        pos_out = predictor(emb[src], emb[dst])
         
-        # 计算预测得分
-        pred = predictor(emb[src], emb[dst]).view(-1)
+        # 4. 手动生成负样本 - 使用子图节点索引
+        # 为每个源节点随机生成一个负目标节点
+        dst_neg = torch.randint(0, subgraph.num_nodes, (num_pos,), 
+                               dtype=torch.long, device=subgraph.x.device)
         
-        # 计算二元交叉熵损失
-        loss = F.binary_cross_entropy_with_logits(pred, edge_label)
-        loss +=  + config.task.lambda_v * loss_v + config.task.lambda_t * loss_t
+        # 5. 计算负样本预测得分
+        neg_out = predictor(emb[src], emb[dst_neg])
+        
+        # 6. 分别计算正负样本损失（按照整图训练方式）
+        pos_loss = -torch.log(pos_out + 1e-15).mean()
+        neg_loss = -torch.log(1 - neg_out + 1e-15).mean()
+        
+        # 7. 组合总损失
+        loss = pos_loss + neg_loss + config.task.lambda_v * loss_v + config.task.lambda_t * loss_t
+        # 8. 反向传播
         loss.backward()
         optimizer.step()
         
-        total_loss += loss.item() * edge_label.size(0)
-        total_examples += edge_label.size(0)
+        # 9. 累积损失统计
+        total_loss += loss.item() * num_pos
+        total_examples += num_pos
     
     return total_loss / total_examples
 
@@ -354,7 +370,7 @@ def run_lp(config):
         predictor.reset_parameters() if hasattr(predictor, 'reset_parameters') else None
         # 训练
         for epoch in range(config.task.n_epochs):
-            train_loss = train(encoder, predictor, data, config, data.adj_t, data.edge_split, optimizer, batch_size=config.task.batch_size, num_neighbors=config.task.num_neighbors)
+            train_loss = train(encoder, predictor, data, config, data.x, data.adj_t, data.edge_split, optimizer, batch_size=config.task.batch_size)
             print(f"[Run {run+1}] Epoch {epoch+1} | Train Loss: {train_loss:.4f}")
             if epoch % 1 == 0:
                 results = evaluate(encoder, predictor, data.x, data.adj_t, data.edge_split, config.dataset.num_neg, k_list=config.task.k_list)
@@ -367,5 +383,4 @@ def run_lp(config):
                     print(results)
 
         accs.append(final_mrr_test)
-    
     print(f"Average MRR over {config.task.n_runs} runs: {np.mean(accs) * 100:.2f}")
