@@ -66,7 +66,7 @@ class GNNTrainer:
         self.val_ratio = train_params.get('val_ratio', 0.1)
         self.tau = train_params.get('tau', 0.07)
 
-        self.base_dir = Path(__file__).resolve().parent
+        self.base_dir = Path(__file__).resolve().parent.parent
         self.model_save_dir = self.base_dir / "trained_models" / self.dataset_name / self.gnn_model_name
         self.model_save_path = self.model_save_dir / "model.pt"
         os.makedirs(self.model_save_dir, exist_ok=True)

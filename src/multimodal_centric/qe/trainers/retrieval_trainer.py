@@ -38,8 +38,8 @@ class RetrievalTrainer:
 
         # 定义模型保存路径
         self.base_dir = Path(__file__).resolve().parent.parent
-        self.model_save_dir = self.base_dir / "models" / "trained" / self.dataset_name
-        self.model_save_path = self.model_save_dir / f"{self.gnn_model_name}_retrieval_model.pt"
+        self.model_save_dir = self.base_dir / "trained_models" / self.dataset_name / self.gnn_model_name
+        self.model_save_path = self.model_save_dir / "model_retrieval.pt"
         os.makedirs(self.model_save_dir, exist_ok=True)
 
         # 初始化第一阶段的GNN训练器以获取增强嵌入
