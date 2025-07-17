@@ -15,7 +15,7 @@ embedding:
   encoder_name: "Qwen/Qwen2.5-VL-3B-Instruct"
   dimension: 768
 
-# GNN 模型配置
+# GNN 模型配置 (第一阶段)
 model:
   name: GCN
   params:
@@ -23,13 +23,27 @@ model:
     num_layers: 2
     dropout: 0.5
 
-# 训练配置
+# GNN 训练配置 (第一阶段)
 training:
   epochs: 50
   lr: 0.001
   patience: 10
   val_ratio: 0.1
   tau: 0.07
+
+# 双塔检索模型配置 (第二阶段)
+retrieval_model:
+  hidden_dim: 128
+  output_dim: 64
+  num_layers: 2
+  dropout: 0.3
+
+# 检索模型训练配置 (第二阶段)
+retrieval_training:
+  epochs: 30
+  lr: 0.0005
+  patience: 5
+  margin: 0.5 # for TripletLoss
 
 # 评估配置
 evaluation:

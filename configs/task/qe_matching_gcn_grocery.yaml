@@ -28,7 +28,3 @@ model:
 training:
   epochs: 50
   lr: 0.001
-
-# 评估配置 (特定于检索任务)
-evaluation:
-  top_k: [1, 5, 10]
