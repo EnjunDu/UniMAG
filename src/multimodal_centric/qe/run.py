@@ -26,14 +26,16 @@ from src.multimodal_centric.qe.evaluators.modality_matching import MatchingEvalu
 from src.multimodal_centric.qe.evaluators.modality_retrieval import RetrievalEvaluator
 from src.multimodal_centric.qe.evaluators.modality_alignment import AlignmentEvaluator
 
-def convert_ordereddict_to_dict(d):
-    """递归地将OrderedDict转换为dict，以便美观地打印。"""
-    if isinstance(d, OrderedDict):
-        d = dict(d)
-    if isinstance(d, dict):
-        for key, value in d.items():
-            d[key] = convert_ordereddict_to_dict(value)
-    return d
+def represent_ordereddict(dumper, data):
+    """自定义YAML Dumper以正确处理OrderedDict。"""
+    value = []
+    for item_key, item_value in data.items():
+        node_key = dumper.represent_data(item_key)
+        node_value = dumper.represent_data(item_value)
+        value.append((node_key, node_value))
+    return yaml.nodes.MappingNode(u'tag:yaml.org,2002:map', value)
+
+yaml.add_representer(OrderedDict, represent_ordereddict)
 
 def main():
     """主函数，作为整个QE任务的入口。"""
@@ -63,25 +65,19 @@ def main():
     # 根据任务类型，执行不同的训练和评估流程
     if task_name == 'modality_matching':
         print("\n--- 任务: 模态匹配 ---")
-        # 阶段一: 训练或加载GNN模型
         gnn_trainer = GNNTrainer(config)
         gnn_model = gnn_trainer.train_or_load_model()
-        # 实例化评估器
         evaluator = MatchingEvaluator(config, gnn_model)
 
     elif task_name == 'modality_retrieval':
         print("\n--- 任务: 模态检索 (两阶段) ---")
-        # RetrievalTrainer 内部会处理第一阶段的GNN模型加载
         retrieval_trainer = RetrievalTrainer(config)
-        # 第二阶段: 训练或加载检索专用的双塔模型
         retrieval_model = retrieval_trainer.train_or_load_model()
-        # 从检索训练器中获取第一阶段的GNN模型以供评估器使用
         gnn_model = retrieval_trainer.gnn_trainer.model
         evaluator = RetrievalEvaluator(config, gnn_model, retrieval_model)
 
     elif task_name == 'modality_alignment':
         print("\n--- 任务: 模态对齐 (暂未完全实现) ---")
-        # 未来可能也会有两阶段训练
         gnn_trainer = GNNTrainer(config)
         gnn_model = gnn_trainer.train_or_load_model()
         evaluator = AlignmentEvaluator(config, gnn_model)
@@ -95,13 +91,10 @@ def main():
     # 运行评估
     print("\n--- 开始评估 ---")
     results = evaluator.evaluate()
-    
-    # 在打印前将所有OrderedDict转换为dict
-    results_dict = convert_ordereddict_to_dict(results)
 
     print("\n--- 评估完成 ---")
     print("最终结果:")
-    print(yaml.dump(results_dict, indent=2, default_flow_style=False))
+    print(yaml.dump(results, indent=2, default_flow_style=False))
 
 if __name__ == '__main__':
     main()

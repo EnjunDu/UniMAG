@@ -37,7 +37,7 @@ class RetrievalEvaluator(BaseEvaluator):
         super().__init__(config, gnn_model)
         self.retrieval_model = retrieval_model.to(self.device)
         self.retrieval_model.eval()
-        self.top_k_list = self.config.get('evaluation', {}).get('top_k', [1, 5, 10])
+        self.top_k_list = sorted(self.config.get('evaluation', {}).get('top_k', [1, 5, 10]))
 
     def evaluate(self) -> Dict[str, Any]:
         """
