@@ -3,9 +3,12 @@
 GNN 模型训练器
 
 该模块负责：
-1.  第一阶段通用训练：使用InfoNCE损失进行对比学习。
-2.  第二阶段微调：为特定下游任务（如检索）使用专门的损失函数进行微调。
-3.  根据任务类型，自动选择合适的训练或加载策略。
+1.  根据配置初始化一个GNN模型。
+2.  检查是否存在已经为特定数据集和GNN模型训练好的权重。
+3.  如果权重存在，则加载；如果不存在，则执行训练循环。
+4.  训练使用InfoNCE对比学习目标。
+5.  在验证集上实施Early Stopping以防止过拟合。
+6.  保存训练好的模型权重。
 """
 
 import torch
@@ -56,27 +59,23 @@ class GNNTrainer:
         self.dataset_name = self.config['dataset']['name']
         self.gnn_model_name = self.config['model']['name']
         
-        # 通用训练参数
-        train_params = self.config.get('training', {})
-        self.epochs = train_params.get('epochs', 50)
-        self.lr = train_params.get('lr', 0.001)
+        train_params = self.config['training']
+        self.epochs = train_params['epochs']
+        self.lr = train_params['lr']
         self.patience = train_params.get('patience', 10)
         self.val_ratio = train_params.get('val_ratio', 0.1)
         self.tau = train_params.get('tau', 0.07)
-        
-        # 微调专用参数
-        finetune_params = self.config.get('finetune', {})
-        self.ft_epochs = finetune_params.get('epochs', 20)
-        self.ft_lr = finetune_params.get('lr', 1e-4)
-        self.ft_margin = finetune_params.get('margin', 0.1)
 
         self.base_dir = Path(__file__).resolve().parent
         self.model_save_dir = self.base_dir / "trained_models" / self.dataset_name / self.gnn_model_name
+        self.model_save_path = self.model_save_dir / "model.pt"
         os.makedirs(self.model_save_dir, exist_ok=True)
         
         base_path = self.config.get('dataset', {}).get('data_root')
         self.embedding_manager = EmbeddingManager(base_path=base_path)
         self.graph_loader = GraphLoader(config=self.config)
+
+        self.model = self._init_model().to(self.device)
 
     def _init_model(self) -> torch.nn.Module:
         model_params = self.config['model']['params']
@@ -110,6 +109,7 @@ class GNNTrainer:
         query = F.normalize(query, p=2, dim=1)
         positive_key = F.normalize(positive_key, p=2, dim=1)
         all_keys = F.normalize(all_keys, p=2, dim=1)
+        l_pos = (query * positive_key).sum(dim=-1)
         logits = torch.matmul(query, all_keys.T)
         logits /= self.tau
         labels = torch.arange(len(query), device=self.device)
@@ -123,8 +123,8 @@ class GNNTrainer:
         train_edges = edge_index[:, perm[val_size:]]
         return train_edges, val_edges
 
-    def _train_generic(self, model, save_path):
-        print(f"开始为数据集 '{self.dataset_name}' 进行第一阶段通用训练...")
+    def train(self):
+        print(f"开始为数据集 '{self.dataset_name}' 训练GNN模型 '{self.gnn_model_name}'...")
         
         graph = self.graph_loader.load_graph(self.dataset_name)
         train_edge_index, val_edge_index = self._get_data_splits(graph.edge_index)
@@ -145,22 +145,22 @@ class GNNTrainer:
             print(f"  (警告: 在计算基线时忽略了 {num_invalid} 个零向量样本)")
 
         features = torch.from_numpy(np.concatenate((text_embeds, image_embeds), axis=1)).float().to(self.device)
-        optimizer = optim.Adam(model.parameters(), lr=self.lr)
+        optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
         
         best_val_loss = float('inf')
         patience_counter = 0
 
-        for epoch in tqdm(range(self.epochs), desc="GNN Generic Training"):
-            model.train()
+        for epoch in tqdm(range(self.epochs), desc="GNN Training"):
+            self.model.train()
             optimizer.zero_grad()
-            _, enhanced_img, enhanced_txt = model(features, train_edge_index)
+            _, enhanced_img, enhanced_txt = self.model(features, train_edge_index)
             loss = self._calculate_infonce_loss(enhanced_img, enhanced_txt, enhanced_txt)
             loss.backward()
             optimizer.step()
 
-            model.eval()
+            self.model.eval()
             with torch.no_grad():
-                _, val_img, val_txt = model(features, val_edge_index)
+                _, val_img, val_txt = self.model(features, val_edge_index)
                 val_loss = self._calculate_infonce_loss(val_img, val_txt, val_txt)
 
             if (epoch + 1) % 10 == 0:
@@ -169,7 +169,7 @@ class GNNTrainer:
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 patience_counter = 0
-                torch.save(model.state_dict(), save_path)
+                torch.save(self.model.state_dict(), self.model_save_path)
             else:
                 patience_counter += 1
             
@@ -177,82 +177,16 @@ class GNNTrainer:
                 tqdm.write(f"验证损失连续 {self.patience} 个轮次没有改善，提前停止训练。")
                 break
         
-        print("第一阶段训练完成。加载性能最佳的模型。")
-        model.load_state_dict(torch.load(save_path))
+        print("训练完成。加载性能最佳的模型。")
+        self.model.load_state_dict(torch.load(self.model_save_path))
 
-    def train_or_load_generic_model(self) -> torch.nn.Module:
-        generic_model_path = self.model_save_dir / "model_generic.pt"
-        model = self._init_model()
-        if generic_model_path.exists():
-            print(f"加载通用预训练模型: {generic_model_path}")
-            model.load_state_dict(torch.load(generic_model_path, map_location=self.device))
+    def train_or_load_model(self) -> torch.nn.Module:
+        if self.model_save_path.exists():
+            print(f"找到了预训练模型，正在从 '{self.model_save_path}' 加载...")
+            self.model.load_state_dict(torch.load(self.model_save_path, map_location=self.device))
         else:
-            print("未找到通用预训练模型，开始第一阶段训练...")
-            self._train_generic(model, generic_model_path)
-        return model.to(self.device)
-
-    def _fine_tune_for_retrieval(self, base_model: torch.nn.Module) -> torch.nn.Module:
-        print("开始第二阶段微调：检索任务")
+            print(f"未找到预训练模型于 '{self.model_save_path}'。")
+            self.train()
         
-        triplet_loss_fn = torch.nn.TripletMarginLoss(margin=self.ft_margin)
-        
-        image_embeds = self.embedding_manager.get_embedding(self.dataset_name, "image", self.config['embedding']['encoder_name'], self.config['embedding']['dimension'])
-        text_embeds = self.embedding_manager.get_embedding(self.dataset_name, "text", self.config['embedding']['encoder_name'], self.config['embedding']['dimension'])
-        features = torch.from_numpy(np.concatenate((text_embeds, image_embeds), axis=1)).float().to(self.device)
-        graph = self.graph_loader.load_graph(self.dataset_name)
-        edge_index = graph.edge_index.to(self.device)
-
-        optimizer = optim.Adam(base_model.parameters(), lr=self.ft_lr)
-
-        for epoch in tqdm(range(self.ft_epochs), desc="Finetuning for Retrieval"):
-            base_model.train()
-            optimizer.zero_grad()
-
-            _, enhanced_img, enhanced_txt = base_model(features, edge_index)
-            
-            # 难负样本挖掘
-            sim_matrix = torch.matmul(F.normalize(enhanced_txt), F.normalize(enhanced_img).T)
-            sim_matrix.fill_diagonal_(-1e9)
-            hard_negative_indices = sim_matrix.argmax(dim=1)
-            hard_negative_images = enhanced_img[hard_negative_indices]
-
-            loss = triplet_loss_fn(enhanced_txt, enhanced_img, hard_negative_images)
-            loss.backward()
-            optimizer.step()
-            if (epoch + 1) % 5 == 0:
-                tqdm.write(f"Finetune Epoch {epoch+1}/{self.ft_epochs}, Triplet Loss: {loss.item():.4f}")
-
-        return base_model
-
-    def _fine_tune_for_alignment(self, base_model: torch.nn.Module) -> torch.nn.Module:
-        print("警告: Alignment 任务的微调尚未实现。返回基础模型。")
-        return base_model
-
-    def train_or_load_model(self, task_name: str) -> torch.nn.Module:
-        """
-        主分发器方法。根据任务名称决定训练策略。
-        """
-        if task_name == 'modality_matching':
-            return self.train_or_load_generic_model()
-
-        finetuned_model_path = self.model_save_dir / f"model_{task_name}.pt"
-        
-        if finetuned_model_path.exists():
-            print(f"加载微调过的模型: {finetuned_model_path}")
-            model = self._init_model()
-            model.load_state_dict(torch.load(finetuned_model_path, map_location=self.device))
-            return model.to(self.device)
-        else:
-            print(f"未找到为 '{task_name}' 微调过的模型。开始两阶段训练...")
-            base_model = self.train_or_load_generic_model()
-            
-            if task_name == 'modality_retrieval':
-                finetuned_model = self._fine_tune_for_retrieval(base_model)
-            elif task_name == 'modality_alignment':
-                finetuned_model = self._fine_tune_for_alignment(base_model)
-            else:
-                raise ValueError(f"未知的微调任务: {task_name}")
-            
-            print(f"保存微调后的模型到: {finetuned_model_path}")
-            torch.save(finetuned_model.state_dict(), finetuned_model_path)
-            return finetuned_model
+        self.model.eval()
+        return self.model

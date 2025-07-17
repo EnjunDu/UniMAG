@@ -60,16 +60,15 @@ def main():
     print("--- 配置加载成功 ---")
     print(yaml.dump(config, indent=2))
 
-    # 2. 准备GNN模型
+    # 2. 训练或加载GNN模型
     print("\n--- 步骤 2: 准备GNN模型 ---")
-    task_name = config.get('task', {}).get('name')
     trainer = GNNTrainer(config)
-    # 将任务名称传递给训练器，以便它决定是否需要微调
-    trained_gnn_model = trainer.train_or_load_model(task_name)
+    trained_gnn_model = trainer.train_or_load_model()
     print("GNN模型已准备就绪。")
 
     # 3. 根据任务选择并实例化评估器
     print("\n--- 步骤 3: 准备评估器 ---")
+    task_name = config.get('task', {}).get('name')
     evaluator = None
 
     print(f"根据任务 '{task_name}' 实例化评估器。")
