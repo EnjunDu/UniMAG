@@ -69,7 +69,7 @@ class GNNTrainer:
 
     def _init_model(self) -> torch.nn.Module:
         """根据配置初始化GNN模型。"""
-        model_params = self.config['model']
+        model_params = self.config['model']['params']
         
         encoder_name = self.config['embedding']['encoder_name']
         dimension = self.config['embedding']['dimension']
