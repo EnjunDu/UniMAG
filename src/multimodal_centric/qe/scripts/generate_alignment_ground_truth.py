@@ -33,7 +33,6 @@ class GroundTruthGenerator:
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         print(f"初始化 GroundTruthGenerator，使用设备: {self.device}")
         
-        # 加载 spaCy 模型
         try:
             self.nlp = spacy.load("en_core_web_sm")
         except OSError:
@@ -41,10 +40,10 @@ class GroundTruthGenerator:
             spacy.cli.download("en_core_web_sm")
             self.nlp = spacy.load("en_core_web_sm")
             
-        # 加载 GroundingDINO 模型
         model_id = "IDEA-Research/grounding-dino-base"
         self.processor = AutoProcessor.from_pretrained(model_id)
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(self.device)
+        self.max_text_length = self.model.config.text_config.max_position_embeddings
 
     def extract_noun_phrases(self, text: str) -> List[str]:
         """从给定文本中提取名词短语。"""
@@ -53,7 +52,7 @@ class GroundTruthGenerator:
 
     def generate_for_single_item(self, image_path: str, text: str) -> List[Dict[str, Any]]:
         """为单个图文对生成定位结果。"""
-        if not os.path.exists(image_path) or not text:
+        if not image_path or not os.path.exists(image_path) or not text:
             return []
             
         try:
@@ -67,7 +66,17 @@ class GroundTruthGenerator:
             return []
 
         text_for_grounding = ". ".join(phrases)
-        inputs = self.processor(images=image, text=text_for_grounding, return_tensors="pt").to(self.device)
+        
+        # 增加 return_attention_mask=True 来确保维度一致
+        inputs = self.processor(
+            images=image, 
+            text=text_for_grounding, 
+            return_tensors="pt",
+            padding="max_length", 
+            truncation=True, 
+            max_length=self.max_text_length,
+            return_attention_mask=True
+        ).to(self.device)
         
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -77,14 +86,13 @@ class GroundTruthGenerator:
             inputs.input_ids,
             box_threshold=0.4,
             text_threshold=0.25,
-            target_sizes=[image.size[::-1]] # (height, width)
+            target_sizes=[image.size[::-1]]
         )
         
         grounding_results = []
         for label, box in zip(results[0]["labels"], results[0]["boxes"]):
             grounding_results.append({"phrase": label, "box": box.cpu().numpy().tolist()})
         return grounding_results
-
 
 def main():
     parser = argparse.ArgumentParser(description="为模态对齐任务生成基准真值文件。")
@@ -113,7 +121,7 @@ def main():
         for i in tqdm(range(num_nodes), desc=f"处理 {args.dataset}"):
             raw_data = manager.get_raw_data_by_index(args.dataset, i)
             
-            if not raw_data or not raw_data.get("image_path"):
+            if not raw_data or not raw_data.get("image_path") or not raw_data.get("text"):
                 continue
 
             grounding_results = generator.generate_for_single_item(raw_data["image_path"], raw_data["text"])

@@ -77,7 +77,7 @@ def main():
         evaluator = RetrievalEvaluator(config, gnn_model, retrieval_model)
 
     elif task_name == 'modality_alignment':
-        print("\n--- 任务: 模态对齐 (暂未完全实现) ---")
+        print("\n--- 任务: 模态对齐 ---")
         gnn_trainer = GNNTrainer(config)
         gnn_model = gnn_trainer.train_or_load_model()
         evaluator = AlignmentEvaluator(config, gnn_model)

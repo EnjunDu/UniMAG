@@ -71,7 +71,6 @@ class EmbeddingManager:
         if not feature_path.exists():
             print(f"警告: 未找到对应的嵌入文件: {feature_path}")
             return None
-        
         return self._storage.load_features(feature_path)
 
     def get_raw_data_by_index(self, dataset_name: str, node_index: int) -> Optional[Dict[str, str]]:
@@ -95,13 +94,8 @@ class EmbeddingManager:
             text_map = self._storage.load_raw_text_map(dataset_name)
             text = text_map.get(target_id, "")
 
-            dataset_path = self._storage.get_dataset_path(dataset_name)
-            is_magb = dataset_name[0].isupper()
-            image_folder_suffix = "Images_extracted" if is_magb else "-images_extracted"
-            image_dir = dataset_path / f"{dataset_name}{image_folder_suffix}"
-            
-            image_paths = glob.glob(f"{image_dir}/{target_id}.*")
-            image_path = image_paths[0] if image_paths else ""
+            image_map = self._storage.load_image_path_map(dataset_name)
+            image_path = image_map.get(target_id, "")
             
             if not text and not image_path:
                 print(f"警告: 未能为ID '{target_id}' 找到文本或图像。")
@@ -161,7 +155,6 @@ class EmbeddingManager:
             }
             if dimension:
                 encoder_kwargs['target_dimension'] = dimension
-
             self._encoders[encoder_instance_key] = EncoderFactory.create_encoder(factory_encoder_type, **encoder_kwargs)
         
         encoder = self._encoders[encoder_instance_key]
@@ -173,7 +166,6 @@ class EmbeddingManager:
         elif modality_enum == ModalityType.MULTIMODAL:
             texts, image_paths = data
             return encoder.encode_multimodal(texts, image_paths, output_feature_map=output_feature_map, **kwargs)
-        
         return None
 
     def view_embedding(
