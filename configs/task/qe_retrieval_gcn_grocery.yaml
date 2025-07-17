@@ -40,10 +40,11 @@ retrieval_model:
 
 # 检索模型训练配置 (第二阶段)
 retrieval_training:
-  epochs: 30
-  lr: 0.0005
-  patience: 5
-  margin: 0.5 # for TripletLoss
+  epochs: 500
+  lr: 0.001
+  patience: 10
+  batch_size: 256
+  tau: 0.07
 
 # 评估配置
 evaluation:

@@ -12,6 +12,7 @@ import sys
 import os
 import numpy as np
 from tqdm import tqdm
+from torch.utils.data import DataLoader, TensorDataset, random_split
 
 # 将项目根目录添加到Python路径中
 project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
@@ -28,22 +29,20 @@ class RetrievalTrainer:
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # 解析配置
         self.dataset_name = config['dataset']['name']
         self.gnn_model_name = config['model']['name']
         retrieval_params = config['retrieval_training']
         self.epochs = retrieval_params['epochs']
         self.lr = retrieval_params['lr']
+        self.batch_size = retrieval_params.get('batch_size', 128)
         self.patience = retrieval_params.get('patience', 10)
-        self.margin = retrieval_params.get('margin', 0.5) # Triplet loss 的 margin
+        self.tau = retrieval_params.get('tau', 0.07)
 
-        # 定义模型保存路径
         self.base_dir = Path(__file__).resolve().parent.parent
         self.model_save_dir = self.base_dir / "trained_models" / self.dataset_name / self.gnn_model_name
         self.model_save_path = self.model_save_dir / "model_retrieval.pt"
         os.makedirs(self.model_save_dir, exist_ok=True)
 
-        # 初始化第一阶段的GNN训练器以获取增强嵌入
         self.gnn_trainer = GNNTrainer(config)
 
     def _get_enhanced_embeddings(self) -> (torch.Tensor, torch.Tensor):
@@ -52,88 +51,107 @@ class RetrievalTrainer:
         """
         print("--- 第一阶段: 获取GNN增强嵌入 ---")
         gnn_model = self.gnn_trainer.train_or_load_model()
-        
-        evaluator = self.gnn_trainer # 借用其属性
+        evaluator = self.gnn_trainer
         image_embeds = evaluator.embedding_manager.get_embedding(evaluator.dataset_name, "image", self.config['embedding']['encoder_name'], self.config['embedding']['dimension'])
         text_embeds = evaluator.embedding_manager.get_embedding(evaluator.dataset_name, "text", self.config['embedding']['encoder_name'], self.config['embedding']['dimension'])
-        
         features = np.concatenate((text_embeds, image_embeds), axis=1)
         features = torch.from_numpy(features).float().to(self.device)
-        
         graph = evaluator.graph_loader.load_graph(evaluator.dataset_name)
         edge_index = graph.edge_index.to(self.device)
-        
         gnn_model.eval()
         with torch.no_grad():
             _, enhanced_img, enhanced_txt = gnn_model(features, edge_index)
-        
         print("成功获取GNN增强嵌入。")
         return enhanced_txt, enhanced_img
 
+    def _calculate_infonce_loss(self, text_embeds, image_embeds):
+        """
+        计算对称的InfoNCE损失。
+        """
+        # 归一化
+        text_embeds = F.normalize(text_embeds, p=2, dim=1)
+        image_embeds = F.normalize(image_embeds, p=2, dim=1)
+
+        # 计算相似度矩阵
+        logits_per_text = torch.matmul(text_embeds, image_embeds.t()) / self.tau
+        logits_per_image = logits_per_text.t()
+
+        # 创建标签
+        labels = torch.arange(len(text_embeds), device=self.device)
+
+        # 计算双向损失
+        loss_text = F.cross_entropy(logits_per_text, labels)
+        loss_image = F.cross_entropy(logits_per_image, labels)
+        
+        return (loss_text + loss_image) / 2
+
     def train(self):
-        """
-        执行第二阶段的训练循环。
-        """
         enhanced_text_embeds, enhanced_image_embeds = self._get_enhanced_embeddings()
         
-        # 初始化双塔模型
         retrieval_model_params = self.config['retrieval_model']
         retrieval_model_params['input_dim'] = enhanced_text_embeds.shape[1]
         retrieval_model = TwoTowerModel(**retrieval_model_params).to(self.device)
         
         optimizer = optim.Adam(retrieval_model.parameters(), lr=self.lr)
-        loss_fn = nn.TripletMarginLoss(margin=self.margin)
 
-        print(f"--- 第二阶段: 开始训练双塔检索模型 ---")
+        dataset = TensorDataset(enhanced_text_embeds, enhanced_image_embeds)
+        # 划分训练集和验证集
+        val_size = int(len(dataset) * 0.1)
+        train_size = len(dataset) - val_size
+        train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+        
+        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=self.batch_size)
+
+        print(f"--- 第二阶段: 开始训练双塔检索模型 (InfoNCE Loss) ---")
         best_val_loss = float('inf')
         patience_counter = 0
 
         for epoch in tqdm(range(self.epochs), desc="Retrieval Training"):
+            # 训练
             retrieval_model.train()
-            optimizer.zero_grad()
-
-            # 获取投影后的嵌入
-            proj_text, proj_image = retrieval_model(enhanced_text_embeds, enhanced_image_embeds)
+            total_train_loss = 0
+            for batch_text, batch_image in train_loader:
+                optimizer.zero_grad()
+                proj_text = retrieval_model.encode_text(batch_text)
+                proj_image = retrieval_model.encode_image(batch_image)
+                loss = self._calculate_infonce_loss(proj_text, proj_image)
+                loss.backward()
+                optimizer.step()
+                total_train_loss += loss.item()
             
-            # 构造三元组 (anchor, positive, negative)
-            # 这里我们使用一个简单的策略：对于每个文本锚点，其对应的图像是正样本，
-            # 随机采样的其他图像是负样本。
-            anchor = proj_text
-            positive = proj_image
-            
-            # 随机采样负样本
-            negative_indices = torch.randperm(len(proj_image))
-            negative = proj_image[negative_indices]
+            avg_train_loss = total_train_loss / len(train_loader)
 
-            loss = loss_fn(anchor, positive, negative)
-            loss.backward()
-            optimizer.step()
-
-            if (epoch + 1) % 10 == 0:
-                tqdm.write(f"Epoch {epoch+1}/{self.epochs}, Triplet Loss: {loss.item():.4f}")
+            # 验证
+            retrieval_model.eval()
+            total_val_loss = 0
+            with torch.no_grad():
+                for batch_text, batch_image in val_loader:
+                    proj_text = retrieval_model.encode_text(batch_text)
+                    proj_image = retrieval_model.encode_image(batch_image)
+                    val_loss = self._calculate_infonce_loss(proj_text, proj_image)
+                    total_val_loss += val_loss.item()
             
-            # Early stopping (简化版，实际应在验证集上计算)
-            if loss.item() < best_val_loss:
-                best_val_loss = loss.item()
+            avg_val_loss = total_val_loss / len(val_loader)
+            tqdm.write(f"Epoch {epoch+1}/{self.epochs}, Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
+
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
                 patience_counter = 0
                 torch.save(retrieval_model.state_dict(), self.model_save_path)
             else:
                 patience_counter += 1
             
             if patience_counter >= self.patience:
-                tqdm.write(f"训练损失连续 {self.patience} 个轮次没有改善，提前停止训练。")
+                tqdm.write(f"验证损失连续 {self.patience} 个轮次没有改善，提前停止训练。")
                 break
         
         print("训练完成。")
+        retrieval_model.load_state_dict(torch.load(self.model_save_path))
         return retrieval_model
 
     def train_or_load_model(self) -> TwoTowerModel:
-        """
-        检查模型是否存在。如果存在，则加载；否则，进行训练。
-        """
-        # 初始化一个空的模型以加载状态或用于训练
         retrieval_model_params = self.config['retrieval_model']
-        # 需要一个虚拟的input_dim来初始化
         retrieval_model_params['input_dim'] = self.config['model']['params']['hidden_dim']
         retrieval_model = TwoTowerModel(**retrieval_model_params).to(self.device)
 
