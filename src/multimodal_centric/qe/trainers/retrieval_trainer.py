@@ -5,6 +5,7 @@
 
 import torch
 import torch.optim as optim
+import torch.nn as nn
 import torch.nn.functional as F
 from pathlib import Path
 import sys
