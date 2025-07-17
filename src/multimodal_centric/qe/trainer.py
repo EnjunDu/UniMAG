@@ -6,8 +6,9 @@ GNN 模型训练器
 1.  根据配置初始化一个GNN模型。
 2.  检查是否存在已经为特定数据集和GNN模型训练好的权重。
 3.  如果权重存在，则加载；如果不存在，则执行训练循环。
-4.  训练使用对比学习目标，最大化同节点图文嵌入的相似度。
-5.  保存训练好的模型权重。
+4.  训练使用InfoNCE对比学习目标。
+5.  在验证集上实施Early Stopping以防止过拟合。
+6.  保存训练好的模型权重。
 """
 
 import torch
@@ -19,6 +20,7 @@ import os
 import yaml
 import numpy as np
 from tqdm import tqdm
+from typing import Optional
 
 # 将项目根目录添加到Python路径中
 project_root = Path(__file__).resolve().parent.parent.parent.parent
@@ -31,69 +33,67 @@ from src.model.MMGCN import Net as MMGCN
 from src.model.MGAT import MGAT as MGAT_model
 from src.model.REVGAT import RevGAT
 
+def calculate_clip_score(image_embedding: np.ndarray, text_embedding: np.ndarray) -> Optional[float]:
+    """
+    计算并返回一对图像和文本嵌入之间的 CLIP-score。
+    如果任一嵌入为零向量，则返回 None。
+    """
+    img_norm = np.linalg.norm(image_embedding)
+    txt_norm = np.linalg.norm(text_embedding)
+
+    if img_norm == 0 or txt_norm == 0:
+        return None
+
+    image_embedding = image_embedding / img_norm
+    text_embedding = text_embedding / txt_norm
+    return 100.0 * np.dot(image_embedding, text_embedding)
+
 class GNNTrainer:
     """
     负责训练、保存和加载用于QE任务的GNN模型。
     """
     def __init__(self, config: dict):
-        """
-        初始化训练器。
-
-        Args:
-            config (dict): 包含所有必要配置的字典。
-        """
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # 从配置中解析关键信息
         self.dataset_name = self.config['dataset']['name']
         self.gnn_model_name = self.config['model']['name']
-        self.epochs = self.config['training']['epochs']
-        self.lr = self.config['training']['lr']
         
-        # 定义模型和日志的存储路径
+        train_params = self.config['training']
+        self.epochs = train_params['epochs']
+        self.lr = train_params['lr']
+        self.patience = train_params.get('patience', 10)
+        self.val_ratio = train_params.get('val_ratio', 0.1)
+        self.tau = train_params.get('tau', 0.07)
+
         self.base_dir = Path(__file__).resolve().parent
         self.model_save_dir = self.base_dir / "trained_models" / self.dataset_name / self.gnn_model_name
         self.model_save_path = self.model_save_dir / "model.pt"
-        self.log_dir = self.base_dir / "logs" / self.dataset_name
         os.makedirs(self.model_save_dir, exist_ok=True)
-        os.makedirs(self.log_dir, exist_ok=True)
         
-        # 初始化管理器
         base_path = self.config.get('dataset', {}).get('data_root')
         self.embedding_manager = EmbeddingManager(base_path=base_path)
         self.graph_loader = GraphLoader(config=self.config)
 
-        # 初始化GNN模型
         self.model = self._init_model().to(self.device)
 
     def _init_model(self) -> torch.nn.Module:
-        """根据配置初始化GNN模型。"""
         model_params = self.config['model']['params']
-        
         encoder_name = self.config['embedding']['encoder_name']
         dimension = self.config['embedding']['dimension']
         sample_text_embed = self.embedding_manager.get_embedding(self.dataset_name, "text", encoder_name, dimension)
-        
-        if sample_text_embed is None:
-            raise ValueError("无法加载嵌入以确定模型输入维度。")
-            
+        if sample_text_embed is None: raise ValueError("无法加载嵌入以确定模型输入维度。")
         in_dim = sample_text_embed.shape[1] * 2
         
-        print(f"根据配置 '{self.gnn_model_name}' 初始化GNN模型，输入维度为 {in_dim}。")
-        
-        if self.gnn_model_name == 'GCN':
-            model = GCN(in_dim=in_dim, **model_params)
-        elif self.gnn_model_name == 'GAT':
-            model = GAT(in_dim=in_dim, **model_params)
-        elif self.gnn_model_name == 'GraphSAGE':
-            model = GraphSAGE(in_dim=in_dim, **model_params)
-        elif self.gnn_model_name == 'MLP':
-            model = MLP(in_dim=in_dim, **model_params)
+        model_params_with_in_dim = {'in_dim': in_dim, **model_params}
+
+        if self.gnn_model_name == 'GCN': model = GCN(**model_params_with_in_dim)
+        elif self.gnn_model_name == 'GAT': model = GAT(**model_params_with_in_dim)
+        elif self.gnn_model_name == 'GraphSAGE': model = GraphSAGE(**model_params_with_in_dim)
+        elif self.gnn_model_name == 'MLP': model = MLP(**model_params_with_in_dim)
         elif self.gnn_model_name == "RevGAT":
             model = RevGAT(in_feats=in_dim, **model_params)
         elif self.gnn_model_name == "MMGCN":
-            # MMGCN 和 MGAT 有不同的参数签名，需要特殊处理
             v_dim = sample_text_embed.shape[1]
             num_nodes = self.graph_loader.load_graph(self.dataset_name).num_nodes()
             model = MMGCN(v_feat_dim=in_dim, t_feat_dim=in_dim, num_nodes=num_nodes, v_dim=v_dim, **model_params)
@@ -105,68 +105,88 @@ class GNNTrainer:
             raise ValueError(f"未知的GNN模型: {self.gnn_model_name}")
         return model
 
-    def _calculate_loss(self, enhanced_image_embeds, enhanced_text_embeds) -> torch.Tensor:
-        """
-        计算对比损失。
-        """
-        enhanced_image_embeds = F.normalize(enhanced_image_embeds, p=2, dim=1)
-        enhanced_text_embeds = F.normalize(enhanced_text_embeds, p=2, dim=1)
-        cosine_sim = F.cosine_similarity(enhanced_image_embeds, enhanced_text_embeds, dim=1)
-        loss = -cosine_sim.mean()
-        return loss
+    def _calculate_infonce_loss(self, query, positive_key, all_keys) -> torch.Tensor:
+        query = F.normalize(query, p=2, dim=1)
+        positive_key = F.normalize(positive_key, p=2, dim=1)
+        all_keys = F.normalize(all_keys, p=2, dim=1)
+        l_pos = (query * positive_key).sum(dim=-1)
+        logits = torch.matmul(query, all_keys.T)
+        logits /= self.tau
+        labels = torch.arange(len(query), device=self.device)
+        return F.cross_entropy(logits, labels)
+
+    def _get_data_splits(self, edge_index):
+        num_edges = edge_index.size(1)
+        perm = torch.randperm(num_edges)
+        val_size = int(num_edges * self.val_ratio)
+        val_edges = edge_index[:, perm[:val_size]]
+        train_edges = edge_index[:, perm[val_size:]]
+        return train_edges, val_edges
 
     def train(self):
-        """执行完整的训练循环。"""
         print(f"开始为数据集 '{self.dataset_name}' 训练GNN模型 '{self.gnn_model_name}'...")
         
         graph = self.graph_loader.load_graph(self.dataset_name)
-        edge_index = graph.edge_index.to(self.device)
-        
+        train_edge_index, val_edge_index = self._get_data_splits(graph.edge_index)
+        train_edge_index = train_edge_index.to(self.device)
+        val_edge_index = val_edge_index.to(self.device)
+
         encoder_name = self.config['embedding']['encoder_name']
         dimension = self.config['embedding']['dimension']
         image_embeds = self.embedding_manager.get_embedding(self.dataset_name, "image", encoder_name, dimension)
         text_embeds = self.embedding_manager.get_embedding(self.dataset_name, "text", encoder_name, dimension)
         
-        if image_embeds is None or text_embeds is None:
-            raise ValueError("无法加载训练所需的嵌入向量。")
-
-        features = np.concatenate((text_embeds, image_embeds), axis=1)
-        features = torch.from_numpy(features).float().to(self.device)
+        scores = [calculate_clip_score(img, txt) for img, txt in zip(image_embeds, text_embeds)]
+        valid_scores = [s for s in scores if s is not None]
+        num_invalid = len(scores) - len(valid_scores)
         
+        print(f"基线 CLIP-Score (无GNN增强): {np.mean(valid_scores):.4f}")
+        if num_invalid > 0:
+            print(f"  (警告: 在计算基线时忽略了 {num_invalid} 个零向量样本)")
+
+        features = torch.from_numpy(np.concatenate((text_embeds, image_embeds), axis=1)).float().to(self.device)
         optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
         
-        print(f"将在 {self.device} 上训练 {self.epochs} 个轮次。")
+        best_val_loss = float('inf')
+        patience_counter = 0
+
         for epoch in tqdm(range(self.epochs), desc="GNN Training"):
             self.model.train()
             optimizer.zero_grad()
-            
-            _, enhanced_img, enhanced_txt = self.model(features, edge_index)
-            loss = self._calculate_loss(enhanced_img, enhanced_txt)
-            
+            _, enhanced_img, enhanced_txt = self.model(features, train_edge_index)
+            loss = self._calculate_infonce_loss(enhanced_img, enhanced_txt, enhanced_txt)
             loss.backward()
             optimizer.step()
-            
+
+            self.model.eval()
+            with torch.no_grad():
+                _, val_img, val_txt = self.model(features, val_edge_index)
+                val_loss = self._calculate_infonce_loss(val_img, val_txt, val_txt)
+
             if (epoch + 1) % 10 == 0:
-                tqdm.write(f"Epoch {epoch+1}/{self.epochs}, Loss: {loss.item():.4f}")
+                tqdm.write(f"Epoch {epoch+1}/{self.epochs}, Train Loss: {loss.item():.4f}, Val Loss: {val_loss.item():.4f}")
+
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                patience_counter = 0
+                torch.save(self.model.state_dict(), self.model_save_path)
+            else:
+                patience_counter += 1
+            
+            if patience_counter >= self.patience:
+                tqdm.write(f"验证损失连续 {self.patience} 个轮次没有改善，提前停止训练。")
+                break
         
-        print("训练完成。")
-        
-        print(f"正在将模型保存到: {self.model_save_path}")
-        torch.save(self.model.state_dict(), self.model_save_path)
-        print("模型保存成功。")
+        print("训练完成。加载性能最佳的模型。")
+        self.model.load_state_dict(torch.load(self.model_save_path))
 
     def train_or_load_model(self) -> torch.nn.Module:
-        """
-        检查模型是否存在。如果存在，则加载；否则，进行训练。
-        """
         if self.model_save_path.exists():
             print(f"找到了预训练模型，正在从 '{self.model_save_path}' 加载...")
             self.model.load_state_dict(torch.load(self.model_save_path, map_location=self.device))
-            self.model.eval()
-            print("模型加载成功。")
         else:
             print(f"未找到预训练模型于 '{self.model_save_path}'。")
             self.train()
-            self.model.eval()
         
+        self.model.eval()
         return self.model
