@@ -9,8 +9,10 @@
 import sys
 from pathlib import Path
 import numpy as np
-from typing import Optional, Union, List, Any,Dict
+from typing import Optional, Union, List, Any, Dict
 from PIL.Image import Image
+import json
+import glob
 
 # 将项目根目录添加到Python路径中
 project_root = Path(__file__).resolve().parent.parent
@@ -26,7 +28,7 @@ from embedding_converter import encoders
 
 class EmbeddingManager:
     """
-    一个高级API，用于获取和查看预先生成的嵌入向量。
+    一个高级API，用于获取和查看预先生成的嵌入向量以及原始数据。
     """
     def __init__(self, base_path: Optional[Union[str, Path]] = None):
         """
@@ -57,7 +59,7 @@ class EmbeddingManager:
             dimension (Optional[int]): 特征维度。如果为None，则获取原生维度特征。
 
         Returns:
-            np.ndarray: 加载的嵌入向量Numpy数组。如果文件不存在则返回None。
+            Optional[np.ndarray]: 加载的嵌入向量Numpy数组。如果文件不存在则返回None。
         """
         feature_path = self._storage.get_feature_path(
             dataset_name=dataset_name,
@@ -71,6 +73,48 @@ class EmbeddingManager:
             return None
         
         return self._storage.load_features(feature_path)
+
+    def get_raw_data_by_index(self, dataset_name: str, node_index: int) -> Optional[Dict[str, str]]:
+        """
+        根据节点在特征文件中的索引，获取其原始文本和图像路径。
+
+        Args:
+            dataset_name (str): 数据集名称。
+            node_index (int): 节点的索引。
+
+        Returns:
+            Optional[Dict[str, str]]: 包含 'text' 和 'image_path' 的字典，如果找不到则返回None。
+        """
+        try:
+            node_ids = self._storage.load_node_ids(dataset_name)
+            if node_index >= len(node_ids):
+                print(f"错误: 索引 {node_index} 超出范围。")
+                return None
+            target_id = node_ids[node_index]
+
+            text_map = self._storage.load_raw_text_map(dataset_name)
+            text = text_map.get(target_id, "")
+
+            dataset_path = self._storage.get_dataset_path(dataset_name)
+            is_magb = dataset_name[0].isupper()
+            image_folder_suffix = "Images_extracted" if is_magb else "-images_extracted"
+            image_dir = dataset_path / f"{dataset_name}{image_folder_suffix}"
+            
+            image_paths = glob.glob(f"{image_dir}/{target_id}.*")
+            image_path = image_paths[0] if image_paths else ""
+            
+            if not text and not image_path:
+                print(f"警告: 未能为ID '{target_id}' 找到文本或图像。")
+                return None
+
+            return {"text": text, "image_path": str(image_path)}
+
+        except FileNotFoundError as e:
+            print(f"错误: {e}")
+            return None
+        except Exception as e:
+            print(f"获取原始数据时发生未知错误: {e}")
+            return None
 
     def generate_embedding(
         self,
@@ -98,7 +142,7 @@ class EmbeddingManager:
             **kwargs: 传递给编码器的其他参数 (例如, cache_dir, device)。
 
         Returns:
-            np.ndarray: 生成的嵌入向量或特征图。
+            Optional[np.ndarray]: 生成的嵌入向量或特征图。
         """
         try:
             modality_enum = ModalityType(modality)
@@ -193,7 +237,7 @@ if __name__ == '__main__':
         dataset_name="books-nc",
         modality="multimodal",
         encoder_name="Qwen/Qwen2.5-VL-3B-Instruct",
-        dimension=None  # 查看原生维度
+        dimension=None
     )
 
     # 4. 即时生成嵌入
@@ -203,7 +247,20 @@ if __name__ == '__main__':
         data=custom_texts,
         modality="text",
         encoder_type="qwen_vl",
-        encoder_name="Qwen/Qwen2.5-VL-7B-Instruct" # 使用一个具体的模型
+        encoder_name="Qwen/Qwen2.5-VL-7B-Instruct"
     )
     if on_the_fly_embeddings is not None:
         print(f"成功即时生成文本嵌入，形状: {on_the_fly_embeddings.shape}")
+
+    # 5. 根据索引获取原始数据
+    print("\n--- 示例4: 获取 'Grocery' 数据集索引为 2 的节点的原始数据 ---")
+    raw_data = manager.get_raw_data_by_index("Grocery", 2)
+    if raw_data:
+        print(f"  文本: {raw_data['text'][:100]}...")
+        print(f"  图像路径: {raw_data['image_path']}")
+
+    print("\n--- 示例5: 获取 'sports-copurchase' 数据集索引为 10 的节点的原始数据 ---")
+    raw_data_sports = manager.get_raw_data_by_index("sports-copurchase", 10)
+    if raw_data_sports:
+        print(f"  文本: {raw_data_sports['text'][:100]}...")
+        print(f"  图像路径: {raw_data_sports['image_path']}")

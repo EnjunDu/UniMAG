@@ -1,8 +1,9 @@
 import os
 import numpy as np
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,8 @@ class StorageManager:
             self.base_path = Path("/home/ai/MMAG")
             
         self._ensure_directory_exists(self.base_path)
+        self._node_id_cache: Dict[str, List[str]] = {}
+        self._raw_text_cache: Dict[str, Dict[str, str]] = {}
     
     def _ensure_directory_exists(self, path: Path):
         """确保目录存在，不存在则创建"""
@@ -38,10 +41,8 @@ class StorageManager:
         feature_dir = self.base_path / dataset_name / f"{modality}_features"
         self._ensure_directory_exists(feature_dir)
 
-        # 处理编码器名称中的特殊字符
         safe_encoder_name = encoder_name.replace('/', '_').replace('-', '_').replace('.', '_')
         
-        # 构建文件名
         dim_str = f"{dimension}d" if dimension is not None else "native"
         filename = f"{dataset_name}_{modality}_{safe_encoder_name}_{dim_str}.npy"
         
@@ -61,6 +62,35 @@ class StorageManager:
         dataset_dir = self.base_path / dataset_name
         self._ensure_directory_exists(dataset_dir)
         return dataset_dir / "metadata.yaml"
+
+    def load_node_ids(self, dataset_name: str) -> List[str]:
+        """加载或从缓存中获取node_ids列表。"""
+        if dataset_name not in self._node_id_cache:
+            node_ids_path = self.get_dataset_path(dataset_name) / "node_ids.json"
+            if not node_ids_path.exists():
+                raise FileNotFoundError(f"节点ID文件未找到: {node_ids_path}")
+            with open(node_ids_path, 'r') as f:
+                self._node_id_cache[dataset_name] = json.load(f)
+        return self._node_id_cache[dataset_name]
+
+    def load_raw_text_map(self, dataset_name: str) -> Dict[str, str]:
+        """加载或从缓存中获取原始文本的ID到内容的映射。"""
+        if dataset_name not in self._raw_text_cache:
+            dataset_path = self.get_dataset_path(dataset_name)
+            jsonl_path = dataset_path / f"{dataset_name}-raw-text.jsonl"
+            if not jsonl_path.exists():
+                 raise FileNotFoundError(f"原始文本文件未找到: {jsonl_path}")
+            
+            text_map = {}
+            with open(jsonl_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    record = json.loads(line)
+                    node_id = str(record.get("id") or record.get("asin"))
+                    raw_text = record.get("raw_text", "")
+                    text_content = " ".join(raw_text) if isinstance(raw_text, list) else str(raw_text)
+                    text_map[node_id] = text_content.strip()
+            self._raw_text_cache[dataset_name] = text_map
+        return self._raw_text_cache[dataset_name]
 
     def get_dataset_path(self, dataset_name: str) -> Path:
         """获取数据集目录路径"""
