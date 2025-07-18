@@ -56,7 +56,6 @@ class RetrievalTrainer:
         if self.enhanced_text_embeds is not None and self.enhanced_image_embeds is not None:
             return self.enhanced_text_embeds, self.enhanced_image_embeds
 
-        print("--- Stage 1: Get GNN enhanced embeddings ---")
         gnn_model = self.gnn_trainer.train_or_load_model()
         
         evaluator = self.gnn_trainer
@@ -102,7 +101,6 @@ class RetrievalTrainer:
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=self.batch_size)
 
-        print(f"--- Stage 2: Start training retrieval model (InfoNCE Loss) ---")
         best_val_loss = float('inf')
         patience_counter = 0
 

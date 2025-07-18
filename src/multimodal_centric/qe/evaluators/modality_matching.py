@@ -51,8 +51,6 @@ class MatchingEvaluator(BaseEvaluator):
         """
         执行完整的评估流程。
         """
-        print("--- Start Modality Matching Evaluation ---")
-        
         enhanced_embeddings = self._get_enhanced_embeddings()
         if enhanced_embeddings is None:
             print("Error: Failed to get enhanced embeddings.")

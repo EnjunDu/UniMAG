@@ -56,7 +56,7 @@ def run_qe(cfg: DictConfig):
         evaluator = MatchingEvaluator(cfg, gnn_model)
 
     elif task_name == 'modality_retrieval':
-        print("\n--- Task: Modality Retrieval (Two-Stage) ---")
+        print("\n--- Task: Modality Retrieval ---")
         retrieval_trainer = RetrievalTrainer(cfg)
         retrieval_model = retrieval_trainer.train_or_load_model()
         gnn_model = retrieval_trainer.gnn_trainer.model

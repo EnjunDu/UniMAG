@@ -43,8 +43,6 @@ class RetrievalEvaluator(BaseEvaluator):
         """
         执行完整的图到文和文到图检索评估。
         """
-        print("--- Start Modality Retrieval Evaluation ---")
-        
         # 1. 获取第一阶段的增强嵌入
         enhanced_embeddings = self._get_enhanced_embeddings()
         if enhanced_embeddings is None:
@@ -71,7 +69,6 @@ class RetrievalEvaluator(BaseEvaluator):
             "image_to_text": i2t_metrics
         }
         
-        print("--- Modality Retrieval Evaluation Completed ---")
         return results
 
     def _calculate_retrieval_metrics(self, queries: np.ndarray, candidates: np.ndarray) -> Dict[str, float]:

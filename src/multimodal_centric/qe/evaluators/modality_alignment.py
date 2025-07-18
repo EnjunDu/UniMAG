@@ -33,8 +33,6 @@ class AlignmentEvaluator(BaseEvaluator):
         """
         执行完整的细粒度对齐评估流程。
         """
-        print("--- Start Modality Alignment Evaluation ---")
-
         if not self.preprocessed_data_path.exists():
             raise FileNotFoundError(
                 f"Preprocessed data file not found: {self.preprocessed_data_path}.\n"
