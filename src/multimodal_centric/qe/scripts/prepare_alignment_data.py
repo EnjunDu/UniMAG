@@ -207,7 +207,7 @@ def run_stage2_static_parallel(ground_truth_file: Path, output_file: Path, confi
     """执行 Stage 2 的静态并行版本。"""
     print("\n--- [Stage 2] Start static parallel extraction and caching of features ---")
     if not ground_truth_file.exists():
-        print(f"Error: Ground truth file not found: '{ground_truth_file}'."); sys.exit(1)
+        print(f"Error: Ground truth file not found, please run stage 1 first."); sys.exit(1)
 
     with open(ground_truth_file, 'r', encoding='utf-8') as f:
         tasks = [json.loads(line) for line in f]
@@ -244,38 +244,32 @@ def run_stage2_static_parallel(ground_truth_file: Path, output_file: Path, confi
 
 def main():
     parser = argparse.ArgumentParser(description="Prepare data for modality alignment task (parallel version).")
-    parser.add_argument("--dataset", type=str, required=True, help="Dataset name to process (e.g., grocery).")
+    parser.add_argument("--dataset", type=str, required=True, help="Dataset name to process (e.g., toys). This must match a file in configs/dataset/.")
     parser.add_argument("--stage", type=str, default="all", choices=["all", "1", "2"], help="Stage to execute. '1' for ground truth, '2' for features.")
     parser.add_argument("--ground_truth_file", type=Path, default=None, help="Manually specify the input ground truth file path for Stage 2.")
     parser.add_argument("--output_file", type=Path, default=None, help="Manually specify the output file path for the final preprocessed data for Stage 2.")
     parser.add_argument("--workers-per-gpu", type=int, nargs='+', required=True, help="Specify the number of workers to start per GPU, e.g., '1 3 3 1'.")
     args = parser.parse_args()
 
+    relative_config_path = "../../../../configs"
+    with initialize(config_path=relative_config_path, job_name="alignment_preprocess", version_base="1.2"):
+        cfg = compose(config_name="config", overrides=[f"dataset={args.dataset.lower()}"])
+        config = OmegaConf.to_container(cfg, resolve=True)
+    
+    dataset_name = cfg.dataset.name
+
     base_output_dir = Path(__file__).resolve().parent / "ground_truth"
-    default_gt_file = base_output_dir / f"{args.dataset}_ground_truth.jsonl"
-    default_output_file = base_output_dir / f"{args.dataset}_alignment_preprocessed.pt"
+    default_gt_file = base_output_dir / f"{dataset_name}_ground_truth.jsonl"
+    default_output_file = base_output_dir / f"{dataset_name}_alignment_preprocessed.pt"
 
     ground_truth_file_to_use = args.ground_truth_file or default_gt_file
     final_output_file = args.output_file or default_output_file
 
-    config = None
-    if args.stage in ["all", "2"]:
-        # 使用 Hydra API 在脚本内部加载和组合配置
-        with initialize(config_path=str(project_root / "configs"), job_name="alignment_preprocess"):
-            # 我们只需要数据集的配置来找到 data_root，以及 embedding 的配置
-            # task 和 model 不是必需的，但 compose API 需要它们作为 defaults 列表的一部分
-            cfg = compose(config_name="config", overrides=[f"dataset={args.dataset.lower()}"])
-            # 将 OmegaConf 对象转换为普通的 dict，以便传递给其他函数
-            config = OmegaConf.to_container(cfg, resolve=True)
-
     if args.stage in ["all", "1"]:
-        generated_gt_path = run_stage1_parallel(args.dataset, default_gt_file, args.workers_per_gpu)
+        generated_gt_path = run_stage1_parallel(dataset_name, default_gt_file, args.workers_per_gpu)
         if args.stage == "all":
             run_stage2_static_parallel(generated_gt_path, final_output_file, config, args.workers_per_gpu)
     elif args.stage == "2":
-        if config is None:
-            print("Error: Stage 2 requires a valid configuration. Could not build one from dataset name.")
-            sys.exit(1)
         run_stage2_static_parallel(ground_truth_file_to_use, final_output_file, config, args.workers_per_gpu)
 
 if __name__ == "__main__":
