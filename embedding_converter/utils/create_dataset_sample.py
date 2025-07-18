@@ -135,7 +135,7 @@ def main():
     parser.add_argument(
         "--base_path",
         type=str,
-        default="hugging_face",
+        default="/home/ai/MMAG",
         help="包含所有数据集的根目录。"
     )
     args = parser.parse_args()

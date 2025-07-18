@@ -2,7 +2,8 @@ import torch
 import numpy as np
 from PIL import Image
 from typing import List, Optional, Union, Literal
-from transformers import InternVLForConditionalGeneration, AutoProcessor
+from transformers import AutoModelForImageTextToText
+from transformers import AutoProcessor
 import logging
 from tqdm import tqdm
 from pathlib import Path
@@ -53,7 +54,7 @@ class InternVL3Encoder(BaseEncoder):
             if self.attn_implementation and self.device and self.device.startswith("cuda"):
                 model_kwargs["attn_implementation"] = self.attn_implementation
             
-            self.model = InternVLForConditionalGeneration.from_pretrained(self.model_name, **model_kwargs)
+            self.model = AutoModelForImageTextToText.from_pretrained(self.model_name, **model_kwargs)
             
             if self.device and ("device_map" not in model_kwargs or model_kwargs.get("device_map") is None):
                 self.model = self.model.to(self.device)

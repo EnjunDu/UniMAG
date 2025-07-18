@@ -28,9 +28,4 @@ for filename in os.listdir(package_dir):
         # 动态导入模块
         # 使用相对导入，格式为 .<module_name>
         # 例如, importlib.import_module('.qwen_vl_encoder', package='embedding_converter.encoders')
-        try:
-            importlib.import_module(f".{module_name}", package=__name__)
-        except ImportError as e:
-            # 在某些情况下，如果存在复杂的依赖关系，可能会出现问题
-            # 添加日志记录以便调试
-            print(f"无法自动导入编码器模块 {module_name}: {e}")
+        importlib.import_module(f".{module_name}", package=__name__)

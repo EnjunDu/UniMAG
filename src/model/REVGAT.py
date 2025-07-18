@@ -4,8 +4,8 @@ import torch.nn.functional as F
 from dgl import function as fn
 from dgl.ops import edge_softmax
 from dgl.utils import expand_as_pair
-import RevGAT.eff_gcn_modules.rev.memgcn as memgcn
-from RevGAT.eff_gcn_modules.rev.rev_layer import SharedDropout
+from src.model.RevGAT.eff_gcn_modules.rev import memgcn
+from src.model.RevGAT.eff_gcn_modules.rev.rev_layer import SharedDropout
 import copy
 import dgl
 
