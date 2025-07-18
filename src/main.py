@@ -13,6 +13,14 @@ if str(project_root) not in sys.path:
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
 
+    # 配置文件兼容性处理
+    if cfg.task.name in ["nc", "lp", "gc"]:
+        if 'params' in cfg.model:
+            OmegaConf.set_struct(cfg.model, False)
+            merged_config = OmegaConf.merge(cfg.model, cfg.model.params)
+            cfg.model = merged_config
+            OmegaConf.set_struct(cfg.model, True)
+
     if cfg.task.name == "nc":
         from graph_centric.nc.run_batch import run_nc
         run_nc(cfg)

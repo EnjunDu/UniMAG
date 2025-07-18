@@ -98,18 +98,18 @@ All downstream tasks are launched via `main.py` using Hydra for configuration ma
 
 To run a **Node Classification** task with the `GCN` model on the `toys` dataset:
 ```bash
-python main.py task=nc model=gcn dataset=toys
+python src/main.py task=nc model=gcn dataset=toys
 ```
 
 ### Multimodal-Centric Task Example
 
 To run a **Modality Matching** quality evaluation task with the `GAT` model on the `grocery` dataset:
 ```bash
-python main.py task=modality_matching model=gat dataset=grocery
+python src/main.py task=modality_matching model=gat dataset=grocery
 ```
 
 You can override any parameter defined in the `configs/` directory. For example, to change the learning rate:
 ```bash
-python main.py task=nc model=gcn dataset=toys training.lr=0.005
+python src/main.py task=nc model=gcn dataset=toys training.lr=0.005
 ```
 
