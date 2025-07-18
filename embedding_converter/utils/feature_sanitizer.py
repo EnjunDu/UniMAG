@@ -16,13 +16,13 @@ class FeatureSanitizer:
     用于清理特征向量文件中的NaN和Inf值。
     """
     
-    def sanitize_file(self, file_path: Union[str, Path], replacement_value: float = 0.0) -> bool:
+    def sanitize_file(self, file_path: Union[str, Path], replacement_value: float = 1.0) -> bool:
         """
-        清理单个特征文件中的NaN和Inf值。
+        清理单个特征文件中的NaN、Inf值和全零向量。
         
         Args:
             file_path: 特征文件的路径。
-            replacement_value: 用于替换NaN和Inf的值，默认为0。
+            replacement_value: 用于替换NaN/Inf以及作为全零向量的替代值，默认为1.0。
             
         Returns:
             如果文件被修改则返回True，否则返回False。
@@ -35,23 +35,30 @@ class FeatureSanitizer:
         try:
             # 加载特征文件
             embeddings = np.load(file_path)
-            
-            # 检查是否存在NaN或Inf值
-            if not np.any(np.isnan(embeddings)) and not np.any(np.isinf(embeddings)):
-                logger.debug(f"文件 {file_path} 无需清理。")
-                return False
-            
-            # 使用np.nan_to_num替换NaN, inf, -inf
-            # nan -> 0.0 (或指定值)
-            # inf -> 正的最大浮点数 (或指定值)
-            # -inf -> 负的最小浮点数 (或指定值)
-            # 为了统一替换为0，我们先用nan_to_num处理nan，再手动处理inf
+            original_embeddings = embeddings.copy()
+
+            # 1. 替换NaN和Inf值
             sanitized_embeddings = np.nan_to_num(
-                embeddings, 
+                embeddings,
                 nan=replacement_value,
                 posinf=replacement_value,
                 neginf=replacement_value
             )
+            
+            # 2. 替换全零向量
+            # 在替换了nan/inf之后，检查是否存在全零行
+            zero_rows_mask = np.all(sanitized_embeddings == 0, axis=1)
+            if np.any(zero_rows_mask):
+                num_zero_vectors = np.sum(zero_rows_mask)
+                logger.info(f"在 {file_path} 中发现并替换 {num_zero_vectors} 个全零向量。")
+                # 创建一个与行形状相同的全`replacement_value`数组
+                replacement_vectors = np.full_like(sanitized_embeddings[zero_rows_mask], replacement_value)
+                sanitized_embeddings[zero_rows_mask] = replacement_vectors
+
+            # 检查是否有任何更改
+            if np.array_equal(original_embeddings, sanitized_embeddings):
+                logger.debug(f"文件 {file_path} 无需清理。")
+                return False
             
             # 覆盖保存文件
             np.save(file_path, sanitized_embeddings)
@@ -62,7 +69,7 @@ class FeatureSanitizer:
             logger.error(f"清理文件 {file_path} 时发生错误: {e}", exc_info=True)
             return False
 
-    def sanitize_directory(self, directory_path: Union[str, Path], replacement_value: float = 0.0):
+    def sanitize_directory(self, directory_path: Union[str, Path], replacement_value: float = 1.0):
         """
         递归清理指定目录下的所有.npy文件。
         
@@ -93,7 +100,7 @@ class FeatureSanitizer:
 
 def main():
     """命令行接口"""
-    parser = argparse.ArgumentParser(description="清理.npy特征文件中的NaN和Inf值。")
+    parser = argparse.ArgumentParser(description="清理.npy特征文件中的NaN、Inf值和全零向量。")
     parser.add_argument(
         "path",
         type=str,
@@ -102,8 +109,8 @@ def main():
     parser.add_argument(
         "--value",
         type=float,
-        default=0.0,
-        help="用于替换NaN和Inf值的数值，默认为0.0。"
+        default=1.0,
+        help="用于替换NaN/Inf和全零向量的数值，默认为1.0。"
     )
     args = parser.parse_args()
     
