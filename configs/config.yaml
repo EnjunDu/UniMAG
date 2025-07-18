@@ -13,7 +13,7 @@ embedding:
   dimension: 768
 
 training:
-  epochs: 50
+  epochs: 100
   lr: 0.001
   patience: 10
   val_ratio: 0.1

@@ -128,7 +128,8 @@ class RetrievalTrainer:
                     total_val_loss += val_loss.item()
             
             avg_val_loss = total_val_loss / len(val_loader)
-            tqdm.write(f"Epoch {epoch+1}/{self.epochs}, Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
+            if epoch % 10 == 0:
+                tqdm.write(f"Epoch {epoch+1}/{self.epochs}, Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
 
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
