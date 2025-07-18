@@ -30,7 +30,7 @@ class EmbeddingManager:
     """
     一个高级API，用于获取和查看预先生成的嵌入向量以及原始数据。
     """
-    def __init__(self, base_path: Optional[Union[str, Path]] = None):
+    def __init__(self, base_path: Optional[Union[str, Path]] = None, config: Optional[Dict[str, Any]] = None, device: Optional[str] = "cuda"):
         """
         初始化嵌入管理器。
 
@@ -38,8 +38,14 @@ class EmbeddingManager:
             base_path (Optional[Union[str, Path]]):
                 数据集的根目录路径。如果未提供，
                 将使用StorageManager中的默认路径 (例如 /home/ai/MMAG)。
+            config (Optional[Dict[str, Any]]):
+                一个可选的配置字典，用于在即时生成嵌入时初始化编码器。
+            device (Optional[str]):
+                一个可选的设备字符串 (例如 "cuda:0")，用于覆盖config中的设备设置。
         """
         self._storage = StorageManager(base_path=base_path)
+        self.config = config or {}
+        self.device = device
         self._encoders: Dict[str, Any] = {}
 
     def get_embedding(
@@ -114,8 +120,8 @@ class EmbeddingManager:
         self,
         data: Union[List[str], List[Image], tuple],
         modality: str,
-        encoder_type: str,
-        encoder_name: str,
+        encoder_type: Optional[str] = None,
+        encoder_name: Optional[str] = None,
         dimension: Optional[int] = None,
         output_feature_map: bool = False,
         **kwargs
@@ -138,23 +144,50 @@ class EmbeddingManager:
         Returns:
             Optional[np.ndarray]: 生成的嵌入向量或特征图。
         """
+        # 如果未提供编码器信息，则尝试从 self.config 中获取
+        if not encoder_type:
+            encoder_type = self.config.get('embedding', {}).get('encoder_type')
+            if not encoder_type:
+                raise ValueError("必须提供 encoder_type 或在 EmbeddingManager 初始化时传入含该值的 config。")
+        if not encoder_name:
+            encoder_name = self.config.get('embedding', {}).get('encoder_name')
+            if not encoder_name:
+                raise ValueError("必须提供 encoder_name 或在 EmbeddingManager 初始化时传入含该值的 config。")
+
         try:
             modality_enum = ModalityType(modality)
         except ValueError:
             print(f"错误: 不支持的模态 '{modality}'")
             return None
 
-        encoder_instance_key = f"{encoder_type}_{encoder_name}_{dimension or 'native'}"
+        # 优先使用 generate_embedding 调用时传入的参数，然后使用 manager 初始化时的参数
+        final_device = kwargs.get('device', self.device)
+        
+        # 从 self.config 中提取编码器和模型的特定参数
+        encoder_params = self.config.get('embedding', {})
+        
+        # 构建 encoder_kwargs
+
+        encoder_kwargs = {
+            'model_name': encoder_name,
+            'cache_dir': kwargs.get('cache_dir', encoder_params.get('cache_dir')),
+            'device': final_device,
+            **(self.config.get('model', {}).get('params', {}))
+        }
+        
+        # 处理维度
+        final_dimension = dimension
+        if final_dimension is None and 'dimension' in encoder_params:
+            final_dimension = encoder_params['dimension']
+
+        factory_encoder_type = f"{encoder_type}_with_dim" if final_dimension else encoder_type
+        if final_dimension:
+            encoder_kwargs['target_dimension'] = final_dimension
+
+        # 创建唯一的编码器实例键
+        encoder_instance_key = f"{factory_encoder_type}_{encoder_name}_{final_dimension or 'native'}_{final_device}"
+
         if encoder_instance_key not in self._encoders:
-            factory_encoder_type = f"{encoder_type}_with_dim" if dimension else encoder_type
-            
-            encoder_kwargs = {
-                'model_name': encoder_name,
-                'cache_dir': kwargs.get('cache_dir'),
-                'device': kwargs.get('device')
-            }
-            if dimension:
-                encoder_kwargs['target_dimension'] = dimension
             self._encoders[encoder_instance_key] = EncoderFactory.create_encoder(factory_encoder_type, **encoder_kwargs)
         
         encoder = self._encoders[encoder_instance_key]
