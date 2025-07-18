@@ -4,9 +4,12 @@ This folder contains the core source code for the multimodal benchmark framework
 
 ## Contents
 - `main.py`: Choosing downstream tasks and hyperparameters
-- `/lp`: Link prediction source code
-- `/nc`: Node classification source code
-- `/gc`: Graph classification source code
+- `/graph_centric`: Contains traditional graph-centric tasks.
+  - `/nc`: Node classification source code
+  - `/lp`: Link prediction source code
+  - `/gc`: Graph classification source code
+- `/multimodal_centric`: Contains tasks that deeply leverage multimodal features.
+  - `/qe`: Multimodal quality evaluation (Matching, Retrieval, Alignment)
 
 ## Models
 ### Model List
@@ -83,4 +86,27 @@ out, out_v, out_t = encoder(data.x, data.edge_index)
 - `out_t`: Embeddings for the second modality, with shape `[num_nodes, hidden_dim]`.
 
 These three outputs represent the node embeddings and the embeddings for the two modalities in the graph.
+
+## Running Downstream Tasks
+
+All downstream tasks are launched via `main.py` using Hydra for configuration management. You can specify the task, model, and dataset from the command line.
+
+### Graph-Centric Task Example
+
+To run a **Node Classification** task with the `GCN` model on the `toys` dataset:
+```bash
+python main.py task=nc model=gcn dataset=toys
+```
+
+### Multimodal-Centric Task Example
+
+To run a **Modality Matching** quality evaluation task with the `GAT` model on the `grocery` dataset:
+```bash
+python main.py task=modality_matching model=gat dataset=grocery
+```
+
+You can override any parameter defined in the `configs/` directory. For example, to change the learning rate:
+```bash
+python main.py task=nc model=gcn dataset=toys training.lr=0.005
+```
 
