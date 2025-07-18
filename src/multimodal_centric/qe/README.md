@@ -61,12 +61,28 @@ python src/main.py task=modality_retrieval model=gat dataset=toys
 **Step 1: Preprocessing (One-time only per dataset)**
 Before running the evaluation for the first time, you must generate the preprocessed data file. This script leverages our Hydra configuration, so you only need to provide the dataset name.
 
+> [!NOTE]
+> This script uses a **parallel** version to speed up preprocessing. You can specify the number of workers per GPU using the `--workers-per-gpu` parameter. You can use `0` to skip a GPU. For example, if you have 4 GPUs, you can use `0 3 3 1` to skip the first GPU and use the remaining 3 GPUs.
+> This script is divided into two stages:
+> 
+> > 1. Generate ground-truth data and save it as a `jsonl` file. (This stage is time-consuming, but the loaded model is small, so it is recommended to assign more workers per GPU.)
+> > 2. Read the `jsonl` file, generate feature pairs, and save them as a `pt` file. (This stage is fast, but the loaded model is large, so it is recommended to assign fewer workers per GPU.)
+>
+> You can specify which stage to execute using the `--stage` parameter. (By default, both stages are executed.)
+
 **Command Example**:
 Generate preprocessing data for the `Grocery` dataset.
 
-Note: This script use a **parallel** version to speed up the preprocessing. You can specify the number of workers per GPU. You can use `0` to skip the GPU. For example, if you have 4 GPUs, you can use `0 3 3 1` to skip the first GPU and use the remaining 3 GPUs.
 ```bash
 python src/multimodal_centric/qe/scripts/prepare_alignment_data.py --dataset grocery --workers-per-gpu 0 3 3 1
+```
+
+If you want to run the two stages separately (for higher efficiency), you can use the following command:
+
+```bash
+# more workers for stage 1
+python src/multimodal_centric/qe/scripts/prepare_alignment_data.py --dataset grocery --stage 1 --workers-per-gpu 10 10 10 10 && \
+python src/multimodal_centric/qe/scripts/prepare_alignment_data.py --dataset grocery --stage 2 --workers-per-gpu 2 2 2 2
 ```
 
 **Step 2: Running the Evaluation**

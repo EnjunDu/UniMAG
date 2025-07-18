@@ -91,6 +91,9 @@ These three outputs represent the node embeddings and the embeddings for the two
 
 All downstream tasks are launched via `main.py` using Hydra for configuration management. You can specify the task, model, and dataset from the command line.
 
+> [!NOTE]
+> For more details, please refer to the `README.md` in each task directory.
+
 ### Graph-Centric Task Example
 
 To run a **Node Classification** task with the `GCN` model on the `toys` dataset:
