@@ -82,7 +82,7 @@ def worker_stage1(task_queue, result_queue, device_id):
                     try:
                         doc = nlp(text)
                         phrases = [chunk.text for chunk in doc.noun_chunks]
-                        if not phrases: status = "no_noun_phrases"
+                        if not phrases: status = "no_noun_phrases (Spacy did not find any noun phrases)"
                         else:
                             text_for_grounding = ". ".join(phrases)
                             inputs = processor(
@@ -97,10 +97,10 @@ def worker_stage1(task_queue, result_queue, device_id):
                                 outputs = model(**inputs)
                             results = processor.post_process_grounded_object_detection(outputs, inputs.input_ids, box_threshold=0.4, text_threshold=0.25, target_sizes=[image.size[::-1]])
                             grounding_results = [{"phrase": label, "box": box.cpu().numpy().tolist()} for label, box in zip(results[0]["labels"], results[0]["boxes"])]
-                            if not grounding_results: status = "grounding_failed"
+                            if not grounding_results: status = "grounding_failed (GroundingDINO did not find any objects)"
                             else: status = "success"
                     except Exception:
-                        status = "processing_error_after_open"
+                        status = "processing_error_after_open (Error occurred after opening the image)"
                         error_info = traceback.format_exc()
         
         result_queue.put((node_index, status, raw_data, grounding_results, error_info))

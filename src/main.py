@@ -3,7 +3,12 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import os
 import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), 'model'))
+from pathlib import Path
+
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 @hydra.main(config_path="../configs", config_name="config", version_base="1.2")
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
