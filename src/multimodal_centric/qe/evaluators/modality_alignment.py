@@ -27,7 +27,7 @@ class AlignmentEvaluator(BaseEvaluator):
     """
     def __init__(self, config: Dict[str, Any], gnn_model: torch.nn.Module):
         super().__init__(config, gnn_model)
-        self.preprocessed_data_dir = Path(__file__).resolve().parent / "ground_truth"
+        self.preprocessed_data_dir = Path(__file__).resolve().parent.parent / "scripts" / "ground_truth"
         self.preprocessed_data_path = self.preprocessed_data_dir / f"{self.config['dataset']['name']}_alignment_preprocessed.pt"
 
     def evaluate(self) -> Dict[str, float]:
