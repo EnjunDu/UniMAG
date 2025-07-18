@@ -39,7 +39,7 @@ class AlignmentEvaluator(BaseEvaluator):
                 f"Please run 'prepare_alignment_data.py' script with '--stage all' or '--stage 2' to generate this file."
             )
 
-        print(f"正在从 '{self.preprocessed_data_path}' 加载预处理数据...")
+        print(f"Loading preprocessed data from '{self.preprocessed_data_path}'...")
         preprocessed_data = torch.load(self.preprocessed_data_path)
         if not preprocessed_data:
             print("Error: Preprocessed data file is empty.")
