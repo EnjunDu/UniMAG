@@ -10,7 +10,6 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from typing import Dict, Any
-from collections import defaultdict
 
 project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
 if str(project_root) not in sys.path:
@@ -60,14 +59,23 @@ class AlignmentEvaluator(BaseEvaluator):
         edge_index = self.graph_loader.load_graph(self.config['dataset']['name']).edge_index.to(self.device)
 
         all_scores = []
+        invalid_pairs_count = 0
         
         for item in tqdm(preprocessed_data, desc="评估对齐分数"):
             node_index = item["node_index"]
-            phrase_embedding = item["phrase_embedding"].to(self.device)
-            region_embedding = item["region_embedding"].to(self.device)
+            phrase_embedding = item["phrase_embedding"]
+            region_embedding = item["region_embedding"]
+
+            # 使用 torch.isnan 和 torch.isinf 进行数值检查
+            if torch.isnan(phrase_embedding).any() or torch.isinf(phrase_embedding).any() or \
+               torch.isnan(region_embedding).any() or torch.isinf(region_embedding).any():
+                invalid_pairs_count += 1
+                continue
+
+            phrase_embedding = phrase_embedding.to(self.device)
+            region_embedding = region_embedding.to(self.device)
 
             # 1. 构建GNN输入
-            # 确保维度匹配
             if phrase_embedding.shape != region_embedding.shape:
                 min_dim = min(phrase_embedding.shape[0], region_embedding.shape[0])
                 phrase_embedding = phrase_embedding[:min_dim]
@@ -78,6 +86,7 @@ class AlignmentEvaluator(BaseEvaluator):
             expected_dim = global_features_tensor.shape[1]
             if local_feature_pair.shape[1] != expected_dim:
                 print(f"警告: 局部特征维度 {local_feature_pair.shape[1]} 与全局特征维度 {expected_dim} 不匹配。跳过此对。")
+                invalid_pairs_count += 1
                 continue
 
             # 2. 替换全局特征中的对应行
@@ -94,12 +103,17 @@ class AlignmentEvaluator(BaseEvaluator):
             score = calculate_clip_score(enhanced_local_img, enhanced_local_txt)
             if score is not None:
                 all_scores.append(score)
+            else:
+                invalid_pairs_count += 1
+
+        if invalid_pairs_count > 0:
+            print(f"警告: 在评估过程中，由于数值无效或维度不匹配，共跳过了 {invalid_pairs_count} 个特征对。")
 
         if not all_scores:
             print("错误: 未能计算任何有效的对齐分数。")
             return {"error": "No valid alignment scores could be calculated."}
 
-        mean_alignment_score = np.mean(all_scores)
-        print(f"评估完成。在 {len(all_scores)} 个局部特征对上计算的平均对齐分数: {mean_alignment_score:.4f}")
+        mean_alignment_score = np.nanmean(all_scores)
+        print(f"评估完成。在 {len(all_scores)} 个有效局部特征对上计算的平均对齐分数: {mean_alignment_score:.4f}")
         
         return {"mean_alignment_score": float(mean_alignment_score)}
