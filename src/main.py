@@ -17,5 +17,9 @@ def main(cfg: DictConfig):
     elif cfg.task.name == "gc":
         from graph_centric.gc.run import run_gc
         run_gc(cfg)
+    elif cfg.task.name in ["modality_matching", "modality_retrieval", "modality_alignment"]:
+        from multimodal_centric.qe.run import run_qe
+        run_qe(cfg)
+
 if __name__ == "__main__":
     main()

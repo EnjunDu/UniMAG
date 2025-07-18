@@ -7,3 +7,14 @@ defaults:
 seed: 42
 log_dir: outputs/
 device: cuda
+
+embedding:
+  encoder_name: "Qwen/Qwen2.5-VL-3B-Instruct"
+  dimension: 768
+
+training:
+  epochs: 50
+  lr: 0.001
+  patience: 10
+  val_ratio: 0.1
+  tau: 0.07

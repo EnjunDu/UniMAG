@@ -15,6 +15,7 @@ from pathlib import Path
 import sys
 import os
 from collections import OrderedDict
+from omegaconf import DictConfig, OmegaConf
 
 # 将项目根目录添加到Python路径中
 project_root = Path(__file__).resolve().parent.parent.parent.parent
@@ -37,50 +38,35 @@ def represent_ordereddict(dumper, data):
 
 yaml.add_representer(OrderedDict, represent_ordereddict)
 
-def main():
-    """主函数，作为整个QE任务的入口。"""
-    parser = argparse.ArgumentParser(description="运行多模态质量评估（QE）任务")
-    parser.add_argument(
-        '--config', 
-        type=str, 
-        required=True, 
-        help='指向任务配置文件的路径'
-    )
-    args = parser.parse_args()
+def run_qe(cfg: DictConfig):
+    """
+    QE任务的统一执行函数，由 src/main.py 调用。
+    """
+    print("--- QE 任务模块已启动 ---")
+    print(OmegaConf.to_yaml(cfg))
 
-    # 1. 加载配置文件
-    try:
-        with open(args.config, 'r') as f:
-            config = yaml.safe_load(f)
-    except FileNotFoundError:
-        print(f"错误: 配置文件未找到 at {args.config}")
-        sys.exit(1)
-
-    print("--- 配置加载成功 ---")
-    print(yaml.dump(config, indent=2))
-
-    task_name = config.get('task', {}).get('name')
+    task_name = cfg.task.name
     evaluator = None
 
     # 根据任务类型，执行不同的训练和评估流程
     if task_name == 'modality_matching':
         print("\n--- 任务: 模态匹配 ---")
-        gnn_trainer = GNNTrainer(config)
+        gnn_trainer = GNNTrainer(cfg)
         gnn_model = gnn_trainer.train_or_load_model()
-        evaluator = MatchingEvaluator(config, gnn_model)
+        evaluator = MatchingEvaluator(cfg, gnn_model)
 
     elif task_name == 'modality_retrieval':
         print("\n--- 任务: 模态检索 (两阶段) ---")
-        retrieval_trainer = RetrievalTrainer(config)
+        retrieval_trainer = RetrievalTrainer(cfg)
         retrieval_model = retrieval_trainer.train_or_load_model()
         gnn_model = retrieval_trainer.gnn_trainer.model
-        evaluator = RetrievalEvaluator(config, gnn_model, retrieval_model)
+        evaluator = RetrievalEvaluator(cfg, gnn_model, retrieval_model)
 
     elif task_name == 'modality_alignment':
         print("\n--- 任务: 模态对齐 ---")
-        gnn_trainer = GNNTrainer(config)
+        gnn_trainer = GNNTrainer(cfg)
         gnn_model = gnn_trainer.train_or_load_model()
-        evaluator = AlignmentEvaluator(config, gnn_model)
+        evaluator = AlignmentEvaluator(cfg, gnn_model)
         
     else:
         print(f"错误: 未知的任务名称 '{task_name}'。请检查配置文件。")
@@ -94,7 +80,31 @@ def main():
 
     print("\n--- 评估完成 ---")
     print("最终结果:")
-    print(yaml.dump(results, indent=2, default_flow_style=False))
+    # 使用 OmegaConf.to_yaml 以更好地处理 Hydra 配置对象
+    print(OmegaConf.to_yaml(results))
+    return results
+
+def main_standalone():
+    """主函数，用于独立、快速地调试QE任务，不通过 src/main.py。"""
+    parser = argparse.ArgumentParser(description="独立运行多模态质量评估（QE）任务")
+    parser.add_argument(
+        '--config',
+        type=str,
+        required=True,
+        help='指向任务配置文件的路径 (例如: configs/task/qe_matching_gcn_grocery.yaml)'
+    )
+    args = parser.parse_args()
+
+    try:
+        with open(args.config, 'r') as f:
+            config_dict = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"错误: 配置文件未找到 at {args.config}")
+        sys.exit(1)
+    
+    # 将字典转换为 OmegaConf 对象以调用新函数
+    cfg = OmegaConf.create(config_dict)
+    run_qe(cfg)
 
 if __name__ == '__main__':
-    main()
+    main_standalone()
