@@ -167,69 +167,87 @@ def run_stage1_parallel(dataset_name: str, output_file: Path, workers_per_gpu: L
     print(f"--- [Stage 1] 完成，真值文件已保存到: {output_file} ---")
     return output_file
 
-# ... Stage 2 的并行实现将遵循类似模式 ...
-# 为了保持代码清晰，我们可以在确认Stage 1工作正常后再实现Stage 2的并行化。
-# 这里暂时保留Stage 2的串行实现。
-
-def run_stage2_extract_features(ground_truth_file: Path, output_file: Path, config: Dict[str, Any]):
-    """执行 Stage 2，提取并缓存特征。"""
-    print("\n--- [Stage 2] 开始提取并缓存特征 ---")
-    if not ground_truth_file.exists():
-        print(f"错误: 找不到真值文件 '{ground_truth_file}'。请先运行 Stage 1 或提供正确的文件路径。")
-        sys.exit(1)
-
-    manager = EmbeddingManager()
-    preprocessed_data = []
+def worker_stage2(tasks: List[Dict], device_id: int, config: Dict[str, Any], temp_file_path: Path):
+    """Stage 2 的工作进程函数（静态分配版）。"""
+    device = f"cuda:{device_id}"
+    manager = EmbeddingManager(config=config, device=device)
     
-    encoder_type = config['embedding']['encoder_type']
-    encoder_name = config['embedding']['encoder_name']
-    dimension = config['embedding']['dimension']
-
-    with open(ground_truth_file, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-        for line in tqdm(lines, desc="Stage 2: 提取特征"):
-            record = json.loads(line)
-            node_index = record["node_index"]
-            image_path = record["image_path"]
-            
-            try:
-                image = Image.open(image_path).convert("RGB")
-            except Exception as e:
-                print(f"警告: 无法打开图像 {image_path}，跳过节点 {node_index}。错误: {e}")
-                continue
-
-            for grounding_pair in record["grounding"]:
+    results = []
+    # 使用 position=device_id 让每个worker的进度条显示在不同行
+    for task in tqdm(tasks, desc=f"Worker (GPU:{device_id}) Stage 2", position=device_id+1):
+        try:
+            image = Image.open(task["image_path"]).convert("RGB")
+            for grounding_pair in task["grounding"]:
                 phrase = grounding_pair["phrase"]
                 box = grounding_pair["box"]
 
-                phrase_embed = manager.generate_embedding(data=[phrase], modality="text", encoder_type=encoder_type, encoder_name=encoder_name, dimension=dimension)
+                phrase_embed = manager.generate_embedding(data=[phrase], modality="text")
                 if phrase_embed is None: continue
 
                 region_image = image.crop((box[0], box[1], box[2], box[3]))
-                region_embed = manager.generate_embedding(data=[region_image], modality="image", encoder_type=encoder_type, encoder_name=encoder_name, dimension=dimension)
+                region_embed = manager.generate_embedding(data=[region_image], modality="image")
                 if region_embed is None: continue
                 
-                preprocessed_data.append({
-                    "node_index": node_index,
+                results.append({
+                    "node_index": task["node_index"],
                     "phrase": phrase,
                     "box": box,
                     "phrase_embedding": torch.from_numpy(phrase_embed).float().squeeze(),
                     "region_embedding": torch.from_numpy(region_embed).float().squeeze()
                 })
+        except Exception:
+            # 在静态模式下，简单跳过有问题的任务
+            continue
+            
+    torch.save(results, temp_file_path)
 
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(preprocessed_data, output_file)
-    print(f"--- [Stage 2] 完成，预处理特征已保存到: {output_file} ---")
+def run_stage2_static_parallel(ground_truth_file: Path, output_file: Path, config: Dict[str, Any], workers_per_gpu: List[int]):
+    """执行 Stage 2 的静态并行版本。"""
+    print("\n--- [Stage 2] 开始静态并行提取并缓存特征 ---")
+    if not ground_truth_file.exists():
+        print(f"错误: 找不到真值文件 '{ground_truth_file}'。"); sys.exit(1)
+
+    with open(ground_truth_file, 'r', encoding='utf-8') as f:
+        tasks = [json.loads(line) for line in f]
+
+    device_map = [gpu_id for gpu_id, num_workers in enumerate(workers_per_gpu) for _ in range(num_workers)]
+    total_workers = len(device_map)
+    
+    # 将任务列表静态地分割成N个子列表
+    chunks = [tasks[i::total_workers] for i in range(total_workers)]
+    
+    temp_dir = output_file.parent / f"temp_stage2_{int(time.time())}"
+    temp_dir.mkdir(exist_ok=True)
+    
+    processes = []
+    for i in range(total_workers):
+        temp_file = temp_dir / f"part_{i}.pt"
+        p = mp.Process(target=worker_stage2, args=(chunks[i], device_map[i], config, temp_file))
+        p.start()
+        processes.append(p)
+        
+    for p in processes: p.join()
+    
+    # 合并所有临时文件的结果
+    final_data = []
+    print("--- [Stage 2] 所有工作进程已完成，正在合并结果... ---")
+    for temp_file_path in sorted(temp_dir.glob("part_*.pt")):
+        final_data.extend(torch.load(temp_file_path))
+        os.remove(temp_file_path)
+    os.rmdir(temp_dir)
+    
+    torch.save(final_data, output_file)
+    print(f"--- [Stage 2] 完成，共处理 {len(final_data)} 个特征对，预处理特征已保存到: {output_file} ---")
 
 
 def main():
     parser = argparse.ArgumentParser(description="为模态对齐任务准备数据（并行版）。")
     parser.add_argument("--dataset", type=str, required=True, help="要处理的数据集名称。")
-    parser.add_argument("--stage", type=str, default="all", choices=["all", "1", "generate", "2", "extract"], help="要执行的阶段。")
-    parser.add_argument("--config", type=str, help="指向任务配置文件的路径 (用于Stage 2获取嵌入参数)。")
+    parser.add_argument("--stage", type=str, default="all", choices=["all", "1", "2"], help="要执行的阶段。'1' for ground truth, '2' for features.")
+    parser.add_argument("--config", type=str, help="指向任务配置文件的路径 (Stage 2必需)。")
     parser.add_argument("--ground_truth_file", type=Path, default=None, help="[Stage 2] 手动指定输入的真值文件路径。")
     parser.add_argument("--output_file", type=Path, default=None, help="[Stage 2] 手动指定最终预处理数据的输出文件路径。")
-    parser.add_argument("--workers-per-gpu", type=int, nargs='+', help="[Stage 1] 指定每张GPU上启动的worker数量，例如 '2 4 1 1'。")
+    parser.add_argument("--workers-per-gpu", type=int, nargs='+', help="指定每张GPU上启动的worker数量，例如 '2 4 1 1'。")
     args = parser.parse_args()
 
     base_output_dir = Path(__file__).resolve().parent / "ground_truth"
@@ -239,24 +257,21 @@ def main():
     ground_truth_file_to_use = args.ground_truth_file or default_gt_file
     final_output_file = args.output_file or default_output_file
 
-    if args.stage in ["all", "1", "generate"]:
-        if not args.workers_per_gpu:
-            print("错误: 在执行Stage 1时，必须通过 '--workers-per-gpu' 参数指定worker配置。")
-            sys.exit(1)
-        generated_gt_path = run_stage1_parallel(args.dataset, default_gt_file, args.workers_per_gpu)
-        if args.stage in ["all"]:
-            if not args.config:
-                print("错误: 在 'all' 模式下，必须提供 '--config' 文件以进行Stage 2。")
-                sys.exit(1)
-            with open(args.config, 'r') as f: config = yaml.safe_load(f)
-            run_stage2_extract_features(generated_gt_path, final_output_file, config)
+    if not args.workers_per_gpu:
+        print("错误: 必须通过 '--workers-per-gpu' 参数指定worker配置。"); sys.exit(1)
 
-    elif args.stage in ["2", "extract"]:
-        if not args.config:
-            print("错误: 在执行Stage 2时，必须提供 '--config' 文件。")
-            sys.exit(1)
+    config = None
+    if args.config:
         with open(args.config, 'r') as f: config = yaml.safe_load(f)
-        run_stage2_extract_features(ground_truth_file_to_use, final_output_file, config)
+    elif args.stage in ["all", "2"]:
+        print("错误: 执行Stage 2时必须提供 '--config' 文件。"); sys.exit(1)
+
+    if args.stage in ["all", "1"]:
+        generated_gt_path = run_stage1_parallel(args.dataset, default_gt_file, args.workers_per_gpu)
+        if args.stage == "all":
+            run_stage2_static_parallel(generated_gt_path, final_output_file, config, args.workers_per_gpu)
+    elif args.stage == "2":
+        run_stage2_static_parallel(ground_truth_file_to_use, final_output_file, config, args.workers_per_gpu)
 
 if __name__ == "__main__":
     # 设置多进程启动方法为 'spawn' 以确保CUDA在子进程中正确初始化
