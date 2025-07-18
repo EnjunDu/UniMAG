@@ -1,4 +1,6 @@
 name: Toys
+data_root: /home/ai/MMAG
+
 graph_path: /home/ai/lys/MAG/MAGB-master/dataset/Toys/ToysGraph.pt
 v_emb_path: /home/ai/lys/MAG/MAGB-master/dataset/Toys/ImageFeature/Toys_openai_clip-vit-large-patch14.npy
 t_emb_path: /home/ai/lys/MAG/MAGB-master/dataset/Toys/TextFeature/Toys_Llama_3.2_1B_Instruct_256_mean.npy
