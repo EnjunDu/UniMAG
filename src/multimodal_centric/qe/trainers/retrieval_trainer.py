@@ -56,7 +56,7 @@ class RetrievalTrainer:
         if self.enhanced_text_embeds is not None and self.enhanced_image_embeds is not None:
             return self.enhanced_text_embeds, self.enhanced_image_embeds
 
-        print("--- 第一阶段: 获取GNN增强嵌入 ---")
+        print("--- Stage 1: Get GNN enhanced embeddings ---")
         gnn_model = self.gnn_trainer.train_or_load_model()
         
         evaluator = self.gnn_trainer
@@ -73,7 +73,7 @@ class RetrievalTrainer:
         with torch.no_grad():
             _, enhanced_img, enhanced_txt = gnn_model(features, edge_index)
         
-        print("成功获取GNN增强嵌入。")
+        print("Successfully got GNN enhanced embeddings.")
         self.enhanced_text_embeds = enhanced_txt
         self.enhanced_image_embeds = enhanced_img
         return self.enhanced_text_embeds, self.enhanced_image_embeds
@@ -102,7 +102,7 @@ class RetrievalTrainer:
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=self.batch_size)
 
-        print(f"--- 第二阶段: 开始训练双塔检索模型 (InfoNCE Loss) ---")
+        print(f"--- Stage 2: Start training retrieval model (InfoNCE Loss) ---")
         best_val_loss = float('inf')
         patience_counter = 0
 
@@ -140,10 +140,10 @@ class RetrievalTrainer:
                 patience_counter += 1
             
             if patience_counter >= self.patience:
-                tqdm.write(f"验证损失连续 {self.patience} 个轮次没有改善，提前停止训练。")
+                tqdm.write(f"Validation loss has not improved for {self.patience} consecutive epochs. Early stopping.")
                 break
         
-        print("训练完成。")
+        print("Training completed. Loading best performing model.")
         retrieval_model.load_state_dict(torch.load(self.model_save_path))
         return retrieval_model
 
@@ -161,10 +161,10 @@ class RetrievalTrainer:
         retrieval_model = TwoTowerModel(**retrieval_model_params).to(self.device)
 
         if self.model_save_path.exists():
-            print(f"找到了预训练的检索模型，正在从 '{self.model_save_path}' 加载...")
+            print(f"Found pre-trained retrieval model at '{self.model_save_path}'. Loading...")
             retrieval_model.load_state_dict(torch.load(self.model_save_path, map_location=self.device))
         else:
-            print(f"未找到预训练的检索模型于 '{self.model_save_path}'。")
+            print(f"No pre-trained retrieval model found at '{self.model_save_path}'.")
             retrieval_model = self.train(retrieval_model)
         
         retrieval_model.eval()

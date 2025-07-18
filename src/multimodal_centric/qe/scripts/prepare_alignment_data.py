@@ -105,13 +105,13 @@ def worker_stage1(task_queue, result_queue, device_id):
 
 def run_stage1_parallel(dataset_name: str, output_file: Path, workers_per_gpu: List[int]):
     """执行 Stage 1 的并行版本。"""
-    print("\n--- [Stage 1] 开始并行生成基准真值文件 ---")
+    print("\n--- [Stage 1] Start parallel generation of ground truth file ---")
     manager = EmbeddingManager()
     try:
         node_ids = manager._storage.load_node_ids(dataset_name)
         num_nodes = len(node_ids)
     except FileNotFoundError as e:
-        print(f"错误: 无法加载节点ID文件: {e}")
+        print(f"Error: Failed to load node ID file: {e}")
         sys.exit(1)
 
     task_queue = mp.Queue()
@@ -137,7 +137,7 @@ def run_stage1_parallel(dataset_name: str, output_file: Path, workers_per_gpu: L
     results_buffer = {}
     failed_nodes_info = []
     with open(output_file, 'w', encoding='utf-8') as f:
-        for _ in tqdm(range(num_nodes), desc="Stage 1: 生成真值"):
+        for _ in tqdm(range(num_nodes), desc="Stage 1: Generating ground truth"):
             node_index, status, raw_data, grounding_results, error_info = result_queue.get()
             stats["total_nodes"] += 1
             stats[status] += 1
@@ -145,26 +145,26 @@ def run_stage1_parallel(dataset_name: str, output_file: Path, workers_per_gpu: L
                 record = {"node_index": node_index, "node_id": node_ids[node_index], "image_path": raw_data["image_path"], "text": raw_data["text"], "grounding": grounding_results}
                 results_buffer[node_index] = record
             elif error_info:
-                failed_nodes_info.append(f"  - 节点 {node_index}: 状态={status}\n    错误详情:\n{error_info}\n")
+                failed_nodes_info.append(f"  - Node {node_index}: Status={status}\n     Error details:\n{error_info}\n")
 
         for i in sorted(results_buffer.keys()):
             f.write(json.dumps(results_buffer[i], ensure_ascii=False) + "\n")
 
     for p in processes: p.join()
 
-    print("\n--- [Stage 1] 诊断统计 ---")
-    print(f"总共处理节点: {stats['total_nodes']}, 成功生成真值: {stats['success']}")
-    print("失败/跳过原因:")
+    print("\n--- [Stage 1] Diagnostics ---")
+    print(f"Total nodes processed: {stats['total_nodes']}, Successfully generated ground truth: {stats['success']}")
+    print("Failed/Skipped reasons:")
     for reason, count in stats.items():
         if reason not in ["total_nodes", "success"]: 
             print(f"  - {reason}: {count}")
     
     if failed_nodes_info:
-        print("\n--- 详细错误报告 ---")
+        print("\n--- Detailed error report ---")
         for info in failed_nodes_info:
             print(info)
 
-    print(f"--- [Stage 1] 完成，真值文件已保存到: {output_file} ---")
+    print(f"--- [Stage 1] Completed, ground truth file saved to: {output_file} ---")
     return output_file
 
 def worker_stage2(tasks: List[Dict], device_id: int, config: Dict[str, Any], temp_file_path: Path):
@@ -203,9 +203,9 @@ def worker_stage2(tasks: List[Dict], device_id: int, config: Dict[str, Any], tem
 
 def run_stage2_static_parallel(ground_truth_file: Path, output_file: Path, config: Dict[str, Any], workers_per_gpu: List[int]):
     """执行 Stage 2 的静态并行版本。"""
-    print("\n--- [Stage 2] 开始静态并行提取并缓存特征 ---")
+    print("\n--- [Stage 2] Start static parallel extraction and caching of features ---")
     if not ground_truth_file.exists():
-        print(f"错误: 找不到真值文件 '{ground_truth_file}'。"); sys.exit(1)
+        print(f"Error: Ground truth file not found: '{ground_truth_file}'."); sys.exit(1)
 
     with open(ground_truth_file, 'r', encoding='utf-8') as f:
         tasks = [json.loads(line) for line in f]
@@ -230,24 +230,24 @@ def run_stage2_static_parallel(ground_truth_file: Path, output_file: Path, confi
     
     # 合并所有临时文件的结果
     final_data = []
-    print("--- [Stage 2] 所有工作进程已完成，正在合并结果... ---")
+    print("--- [Stage 2] All worker processes completed, merging results... ---")
     for temp_file_path in sorted(temp_dir.glob("part_*.pt")):
         final_data.extend(torch.load(temp_file_path))
         os.remove(temp_file_path)
     os.rmdir(temp_dir)
     
     torch.save(final_data, output_file)
-    print(f"--- [Stage 2] 完成，共处理 {len(final_data)} 个特征对，预处理特征已保存到: {output_file} ---")
+    print(f"--- [Stage 2] Completed, processed {len(final_data)} feature pairs, preprocessed features saved to: {output_file} ---")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="为模态对齐任务准备数据（并行版）。")
-    parser.add_argument("--dataset", type=str, required=True, help="要处理的数据集名称。")
-    parser.add_argument("--stage", type=str, default="all", choices=["all", "1", "2"], help="要执行的阶段。'1' for ground truth, '2' for features.")
-    parser.add_argument("--config", type=str, help="指向任务配置文件的路径 (Stage 2必需)。")
-    parser.add_argument("--ground_truth_file", type=Path, default=None, help="[Stage 2] 手动指定输入的真值文件路径。")
-    parser.add_argument("--output_file", type=Path, default=None, help="[Stage 2] 手动指定最终预处理数据的输出文件路径。")
-    parser.add_argument("--workers-per-gpu", type=int, nargs='+', help="指定每张GPU上启动的worker数量，例如 '2 4 1 1'。")
+    parser = argparse.ArgumentParser(description="Prepare data for modality alignment task (parallel version).")
+    parser.add_argument("--dataset", type=str, required=True, help="Dataset name to process.")
+    parser.add_argument("--stage", type=str, default="all", choices=["all", "1", "2"], help="Stage to execute. '1' for ground truth, '2' for features.")
+    parser.add_argument("--config", type=str, help="Path to task configuration file (required for Stage 2).")
+    parser.add_argument("--ground_truth_file", type=Path, default=None, help="Manually specify the input ground truth file path for Stage 2.")
+    parser.add_argument("--output_file", type=Path, default=None, help="Manually specify the output file path for the final preprocessed data for Stage 2.")
+    parser.add_argument("--workers-per-gpu", type=int, nargs='+', help="Specify the number of workers to start per GPU, e.g., '1 3 3 1'.")
     args = parser.parse_args()
 
     base_output_dir = Path(__file__).resolve().parent / "ground_truth"
@@ -258,13 +258,13 @@ def main():
     final_output_file = args.output_file or default_output_file
 
     if not args.workers_per_gpu:
-        print("错误: 必须通过 '--workers-per-gpu' 参数指定worker配置。"); sys.exit(1)
+        print("Error: Must specify worker configuration via '--workers-per-gpu' parameter."); sys.exit(1)
 
     config = None
     if args.config:
         with open(args.config, 'r') as f: config = yaml.safe_load(f)
     elif args.stage in ["all", "2"]:
-        print("错误: 执行Stage 2时必须提供 '--config' 文件。"); sys.exit(1)
+        print("Error: Must provide '--config' file when executing Stage 2."); sys.exit(1)
 
     if args.stage in ["all", "1"]:
         generated_gt_path = run_stage1_parallel(args.dataset, default_gt_file, args.workers_per_gpu)

@@ -33,25 +33,25 @@ class AlignmentEvaluator(BaseEvaluator):
         """
         执行完整的细粒度对齐评估流程。
         """
-        print("--- 开始模态对齐评估 ---")
+        print("--- Start Modality Alignment Evaluation ---")
 
         if not self.preprocessed_data_path.exists():
             raise FileNotFoundError(
-                f"未找到预处理数据文件: {self.preprocessed_data_path}。\n"
-                f"请先运行 'prepare_alignment_data.py' 脚本并使用 '--stage all' 或 '--stage 2' 来生成该文件。"
+                f"Preprocessed data file not found: {self.preprocessed_data_path}.\n"
+                f"Please run 'prepare_alignment_data.py' script with '--stage all' or '--stage 2' to generate this file."
             )
 
         print(f"正在从 '{self.preprocessed_data_path}' 加载预处理数据...")
         preprocessed_data = torch.load(self.preprocessed_data_path)
         if not preprocessed_data:
-            print("错误: 预处理数据文件为空。")
+            print("Error: Preprocessed data file is empty.")
             return {"error": "Preprocessed data file is empty."}
 
-        print("加载全局特征以用于GNN增强...")
+        print("Loading global features for GNN enhancement...")
         global_image_embeds = self.embedding_manager.get_embedding(self.config.dataset.name, "image", self.config.embedding.encoder_name, self.config.embedding.dimension)
         global_text_embeds = self.embedding_manager.get_embedding(self.config.dataset.name, "text", self.config.embedding.encoder_name, self.config.embedding.dimension)
         if global_image_embeds is None or global_text_embeds is None:
-            raise ValueError("无法加载全局嵌入进行评估。")
+            raise ValueError("Failed to load global embeddings for evaluation.")
         
         global_features = np.concatenate((global_text_embeds, global_image_embeds), axis=1)
         global_features_tensor = torch.from_numpy(global_features).float().to(self.device)
@@ -61,7 +61,7 @@ class AlignmentEvaluator(BaseEvaluator):
         all_scores = []
         invalid_pairs_count = 0
         
-        for item in tqdm(preprocessed_data, desc="评估对齐分数"):
+        for item in tqdm(preprocessed_data, desc="Evaluating Alignment Scores"):
             node_index = item["node_index"]
             phrase_embedding = item["phrase_embedding"]
             region_embedding = item["region_embedding"]
@@ -85,7 +85,7 @@ class AlignmentEvaluator(BaseEvaluator):
             
             expected_dim = global_features_tensor.shape[1]
             if local_feature_pair.shape[1] != expected_dim:
-                print(f"警告: 局部特征维度 {local_feature_pair.shape[1]} 与全局特征维度 {expected_dim} 不匹配。跳过此对。")
+                print(f"Warning: Local feature dimension {local_feature_pair.shape[1]} does not match global feature dimension {expected_dim}. Skipping this pair.")
                 invalid_pairs_count += 1
                 continue
 
@@ -107,13 +107,13 @@ class AlignmentEvaluator(BaseEvaluator):
                 invalid_pairs_count += 1
 
         if invalid_pairs_count > 0:
-            print(f"警告: 在评估过程中，由于数值无效或维度不匹配，共跳过了 {invalid_pairs_count} 个特征对。")
+            print(f"Warning: During evaluation, {invalid_pairs_count} feature pairs were skipped due to invalid values or dimension mismatches.")
 
         if not all_scores:
-            print("错误: 未能计算任何有效的对齐分数。")
+            print("Error: Failed to calculate any valid alignment scores.")
             return {"error": "No valid alignment scores could be calculated."}
 
         mean_alignment_score = np.nanmean(all_scores)
-        print(f"评估完成。在 {len(all_scores)} 个有效局部特征对上计算的平均对齐分数: {mean_alignment_score:.4f}")
+        print(f"Evaluation completed. The average alignment score on {len(all_scores)} valid local feature pairs is: {mean_alignment_score:.4f}")
         
         return {"mean_alignment_score": float(mean_alignment_score)}

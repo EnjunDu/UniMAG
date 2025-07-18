@@ -42,44 +42,44 @@ def run_qe(cfg: DictConfig):
     """
     QE任务的统一执行函数，由 src/main.py 调用。
     """
-    print("--- QE 任务模块已启动 ---")
-    print(OmegaConf.to_yaml(cfg))
+    print("--- Quality Evaluation ---")
+    # print(OmegaConf.to_yaml(cfg))
 
     task_name = cfg.task.name
     evaluator = None
 
     # 根据任务类型，执行不同的训练和评估流程
     if task_name == 'modality_matching':
-        print("\n--- 任务: 模态匹配 ---")
+        print("\n--- Task: Modality Matching ---")
         gnn_trainer = GNNTrainer(cfg)
         gnn_model = gnn_trainer.train_or_load_model()
         evaluator = MatchingEvaluator(cfg, gnn_model)
 
     elif task_name == 'modality_retrieval':
-        print("\n--- 任务: 模态检索 (两阶段) ---")
+        print("\n--- Task: Modality Retrieval (Two-Stage) ---")
         retrieval_trainer = RetrievalTrainer(cfg)
         retrieval_model = retrieval_trainer.train_or_load_model()
         gnn_model = retrieval_trainer.gnn_trainer.model
         evaluator = RetrievalEvaluator(cfg, gnn_model, retrieval_model)
 
     elif task_name == 'modality_alignment':
-        print("\n--- 任务: 模态对齐 ---")
+        print("\n--- Task: Modality Alignment ---")
         gnn_trainer = GNNTrainer(cfg)
         gnn_model = gnn_trainer.train_or_load_model()
         evaluator = AlignmentEvaluator(cfg, gnn_model)
         
     else:
-        print(f"错误: 未知的任务名称 '{task_name}'。请检查配置文件。")
+        print(f"Error: Unknown task name '{task_name}'. Please check the configuration file.")
         sys.exit(1)
     
-    print(f"{task_name.capitalize()}评估器已成功实例化。")
+    print(f"{task_name.capitalize()} evaluator has been successfully instantiated.")
 
     # 运行评估
-    print("\n--- 开始评估 ---")
+    print("\n--- Start Evaluation ---")
     results = evaluator.evaluate()
 
-    print("\n--- 评估完成 ---")
-    print("最终结果:")
+    print("\n--- Evaluation Completed ---")
+    print("Final Results:")
     # 将结果转换为普通字典以便打印
     if isinstance(results, OrderedDict):
         results = dict(results)
@@ -93,12 +93,12 @@ def run_qe(cfg: DictConfig):
 
 def main_standalone():
     """主函数，用于独立、快速地调试QE任务，不通过 src/main.py。"""
-    parser = argparse.ArgumentParser(description="独立运行多模态质量评估（QE）任务")
+    parser = argparse.ArgumentParser(description="Run Multimodal Quality Evaluation (QE) tasks independently")
     parser.add_argument(
         '--config',
         type=str,
         required=True,
-        help='指向任务配置文件的路径 (例如: configs/task/qe_matching_gcn_grocery.yaml)'
+        help='Path to the task configuration file (e.g., configs/task/qe_matching_gcn_grocery.yaml)'
     )
     args = parser.parse_args()
 
@@ -106,7 +106,7 @@ def main_standalone():
         with open(args.config, 'r') as f:
             config_dict = yaml.safe_load(f)
     except FileNotFoundError:
-        print(f"错误: 配置文件未找到 at {args.config}")
+        print(f"Error: Configuration file not found at {args.config}")
         sys.exit(1)
     
     # 将字典转换为 OmegaConf 对象以调用新函数

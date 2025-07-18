@@ -51,11 +51,11 @@ class MatchingEvaluator(BaseEvaluator):
         """
         执行完整的评估流程。
         """
-        print("--- 开始模态匹配评估 ---")
+        print("--- Start Modality Matching Evaluation ---")
         
         enhanced_embeddings = self._get_enhanced_embeddings()
         if enhanced_embeddings is None:
-            print("评估失败，无法获取增强嵌入。")
+            print("Error: Failed to get enhanced embeddings.")
             return {"error": "Failed to get enhanced embeddings."}
 
         enhanced_image_embeddings, enhanced_text_embeddings = enhanced_embeddings
@@ -69,13 +69,13 @@ class MatchingEvaluator(BaseEvaluator):
         num_invalid = len(scores) - len(valid_scores)
         
         if not valid_scores:
-            print("错误: 没有任何有效的样本可以计算分数。")
+            print("Error: No valid samples to score.")
             return {"error": "No valid samples to score."}
 
         mean_score = np.mean(valid_scores)
         
-        print(f"评估完成。在 {len(valid_scores)} 个有效样本上计算的平均 CLIP-score: {mean_score:.4f}")
+        print(f"Evaluation completed. The average CLIP-score on {len(valid_scores)} valid samples is: {mean_score:.4f}")
         if num_invalid > 0:
-            print(f"  (警告: 在评估中忽略了 {num_invalid} 个零向量样本)")
+            print(f"  (Warning: {num_invalid} zero-vector samples were ignored during evaluation)")
         
         return {"mean_clip_score": float(mean_score)}

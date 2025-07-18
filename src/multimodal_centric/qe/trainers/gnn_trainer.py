@@ -81,7 +81,7 @@ class GNNTrainer:
         encoder_name = self.config.embedding.encoder_name
         dimension = self.config.embedding.dimension
         sample_text_embed = self.embedding_manager.get_embedding(self.dataset_name, "text", encoder_name, dimension)
-        if sample_text_embed is None: raise ValueError("无法加载嵌入以确定模型输入维度。")
+        if sample_text_embed is None: raise ValueError("Cannot load embedding to determine model input dimension.")
         in_dim = sample_text_embed.shape[1] * 2
         
         model_params_with_in_dim = {'in_dim': in_dim, **model_params}
@@ -101,7 +101,7 @@ class GNNTrainer:
             num_nodes = self.graph_loader.load_graph(self.dataset_name).num_nodes()
             model = MGAT_model(v_feat_dim=in_dim, t_feat_dim=in_dim, num_nodes=num_nodes, v_dim=v_dim, **model_params)
         else:
-            raise ValueError(f"未知的GNN模型: {self.gnn_model_name}")
+            raise ValueError(f"Unknown GNN model: {self.gnn_model_name}")
         return model
 
     def _calculate_infonce_loss(self, query, positive_key, all_keys) -> torch.Tensor:
@@ -123,7 +123,7 @@ class GNNTrainer:
         return train_edges, val_edges
 
     def train(self):
-        print(f"开始为数据集 '{self.dataset_name}' 训练GNN模型 '{self.gnn_model_name}'...")
+        print(f"Start training GNN model '{self.gnn_model_name}' for dataset '{self.dataset_name}'...")
         
         graph = self.graph_loader.load_graph(self.dataset_name)
         train_edge_index, val_edge_index = self._get_data_splits(graph.edge_index)
@@ -139,9 +139,9 @@ class GNNTrainer:
         valid_scores = [s for s in scores if s is not None]
         num_invalid = len(scores) - len(valid_scores)
         
-        print(f"基线 CLIP-Score (无GNN增强): {np.mean(valid_scores):.4f}")
+        print(f"Baseline CLIP-Score (no GNN enhancement): {np.mean(valid_scores):.4f}")
         if num_invalid > 0:
-            print(f"  (警告: 在计算基线时忽略了 {num_invalid} 个零向量样本)")
+            print(f"  (Warning: Ignored {num_invalid} zero-vector samples when calculating baseline)")
 
         features = torch.from_numpy(np.concatenate((text_embeds, image_embeds), axis=1)).float().to(self.device)
         optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
@@ -173,18 +173,18 @@ class GNNTrainer:
                 patience_counter += 1
             
             if patience_counter >= self.patience:
-                tqdm.write(f"验证损失连续 {self.patience} 个轮次没有改善，提前停止训练。")
+                tqdm.write(f"Validation loss has not improved for {self.patience} consecutive epochs. Early stopping.")
                 break
         
-        print("训练完成。加载性能最佳的模型。")
+        print("Training completed. Loading best performing model.")
         self.model.load_state_dict(torch.load(self.model_save_path))
 
     def train_or_load_model(self) -> torch.nn.Module:
         if self.model_save_path.exists():
-            print(f"找到了预训练模型，正在从 '{self.model_save_path}' 加载...")
+            print(f"Found pre-trained model at '{self.model_save_path}'. Loading...")
             self.model.load_state_dict(torch.load(self.model_save_path, map_location=self.device))
         else:
-            print(f"未找到预训练模型于 '{self.model_save_path}'。")
+            print(f"No pre-trained model found at '{self.model_save_path}'.")
             self.train()
         
         self.model.eval()

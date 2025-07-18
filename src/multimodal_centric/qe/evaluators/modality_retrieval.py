@@ -43,12 +43,12 @@ class RetrievalEvaluator(BaseEvaluator):
         """
         执行完整的图到文和文到图检索评估。
         """
-        print("--- 开始模态检索评估 ---")
+        print("--- Start Modality Retrieval Evaluation ---")
         
         # 1. 获取第一阶段的增强嵌入
         enhanced_embeddings = self._get_enhanced_embeddings()
         if enhanced_embeddings is None:
-            print("评估失败，无法获取GNN增强嵌入。")
+            print("Error: Failed to get GNN enhanced embeddings.")
             return {"error": "Failed to get GNN enhanced embeddings."}
         enhanced_text_embeds, enhanced_image_embeds = enhanced_embeddings
         
@@ -60,10 +60,10 @@ class RetrievalEvaluator(BaseEvaluator):
             final_text_embeds = self.retrieval_model.encode_text(enhanced_text_embeds).cpu().numpy()
             final_image_embeds = self.retrieval_model.encode_image(enhanced_image_embeds).cpu().numpy()
 
-        print("正在执行文到图 (Text-to-Image) 检索...")
+        print("Executing Text-to-Image Retrieval...")
         t2i_metrics = self._calculate_retrieval_metrics(final_text_embeds, final_image_embeds)
         
-        print("正在执行图到文 (Image-to-Text) 检索...")
+        print("Executing Image-to-Text Retrieval...")
         i2t_metrics = self._calculate_retrieval_metrics(final_image_embeds, final_text_embeds)
         
         results = {
@@ -71,7 +71,7 @@ class RetrievalEvaluator(BaseEvaluator):
             "image_to_text": i2t_metrics
         }
         
-        print("--- 模态检索评估完成 ---")
+        print("--- Modality Retrieval Evaluation Completed ---")
         return results
 
     def _calculate_retrieval_metrics(self, queries: np.ndarray, candidates: np.ndarray) -> Dict[str, float]:

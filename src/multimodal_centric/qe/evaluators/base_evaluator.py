@@ -64,14 +64,14 @@ class BaseEvaluator(ABC):
         )
 
         if image_embeddings is None or text_embeddings is None:
-            print("错误: 无法加载基础嵌入。")
+            print("Error: Failed to load base embeddings.")
             return None
 
         try:
             graph_data = self.graph_loader.load_graph(dataset_name)
             edge_index = graph_data.edge_index.to(self.device)
         except (FileNotFoundError, ValueError) as e:
-            print(f"错误: 无法加载图结构: {e}")
+            print(f"Error: Failed to load graph structure: {e}")
             return None
 
         multimodal_features = np.concatenate((text_embeddings, image_embeddings), axis=1)
