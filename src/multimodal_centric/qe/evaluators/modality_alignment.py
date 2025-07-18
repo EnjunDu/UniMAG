@@ -27,7 +27,7 @@ class AlignmentEvaluator(BaseEvaluator):
     def __init__(self, config: Dict[str, Any], gnn_model: torch.nn.Module):
         super().__init__(config, gnn_model)
         self.preprocessed_data_dir = Path(__file__).resolve().parent.parent / "scripts" / "ground_truth"
-        self.preprocessed_data_path = self.preprocessed_data_dir / f"{self.config['dataset']['name']}_alignment_preprocessed.pt"
+        self.preprocessed_data_path = self.preprocessed_data_dir / f"{self.config.dataset.name}_alignment_preprocessed.pt"
 
     def evaluate(self) -> Dict[str, float]:
         """
@@ -48,15 +48,15 @@ class AlignmentEvaluator(BaseEvaluator):
             return {"error": "Preprocessed data file is empty."}
 
         print("加载全局特征以用于GNN增强...")
-        global_image_embeds = self.embedding_manager.get_embedding(self.config['dataset']['name'], "image", self.config['embedding']['encoder_name'], self.config['embedding']['dimension'])
-        global_text_embeds = self.embedding_manager.get_embedding(self.config['dataset']['name'], "text", self.config['embedding']['encoder_name'], self.config['embedding']['dimension'])
+        global_image_embeds = self.embedding_manager.get_embedding(self.config.dataset.name, "image", self.config.embedding.encoder_name, self.config.embedding.dimension)
+        global_text_embeds = self.embedding_manager.get_embedding(self.config.dataset.name, "text", self.config.embedding.encoder_name, self.config.embedding.dimension)
         if global_image_embeds is None or global_text_embeds is None:
             raise ValueError("无法加载全局嵌入进行评估。")
         
         global_features = np.concatenate((global_text_embeds, global_image_embeds), axis=1)
         global_features_tensor = torch.from_numpy(global_features).float().to(self.device)
         
-        edge_index = self.graph_loader.load_graph(self.config['dataset']['name']).edge_index.to(self.device)
+        edge_index = self.graph_loader.load_graph(self.config.dataset.name).edge_index.to(self.device)
 
         all_scores = []
         invalid_pairs_count = 0

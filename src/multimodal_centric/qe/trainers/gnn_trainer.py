@@ -62,17 +62,16 @@ class GNNTrainer:
         train_params = self.config.training
         self.epochs = train_params.epochs
         self.lr = train_params.lr
-        self.patience = train_params.get('patience', 10)
-        self.val_ratio = train_params.get('val_ratio', 0.1)
-        self.tau = train_params.get('tau', 0.07)
+        self.patience = train_params.patience
+        self.val_ratio = train_params.val_ratio
+        self.tau = train_params.tau
 
         self.base_dir = Path(__file__).resolve().parent.parent
         self.model_save_dir = self.base_dir / "trained_models" / self.dataset_name / self.gnn_model_name
         self.model_save_path = self.model_save_dir / "model.pt"
         os.makedirs(self.model_save_dir, exist_ok=True)
         
-        base_path = self.config.dataset.get('data_root')
-        self.embedding_manager = EmbeddingManager(base_path=base_path)
+        self.embedding_manager = EmbeddingManager(base_path=self.config.dataset.data_root)
         self.graph_loader = GraphLoader(config=self.config)
 
         self.model = self._init_model().to(self.device)

@@ -39,8 +39,7 @@ class BaseEvaluator(ABC):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.gnn_model.to(self.device)
 
-        base_path = self.config.get('dataset', {}).get('data_root')
-        self.embedding_manager = EmbeddingManager(base_path=base_path)
+        self.embedding_manager = EmbeddingManager(base_path=self.config.dataset.data_root)
         self.graph_loader = GraphLoader(config=self.config)
 
     def _get_enhanced_embeddings(self) -> Optional[Tuple[np.ndarray, np.ndarray]]:
@@ -50,15 +49,15 @@ class BaseEvaluator(ABC):
 
         Returns:
             Optional[Tuple[np.ndarray, np.ndarray]]:
-                一个包含 (所有节点的增强图像嵌入, 所有节点的增强文本嵌入) 的元组。
-                如果无法获取任何所需数据，则返回 None。
-        """
-        dataset_name = self.config['dataset']['name']
-        encoder_name = self.config['embedding']['encoder_name']
-        dimension = self.config['embedding']['dimension']
-
-        image_embeddings = self.embedding_manager.get_embedding(
-            dataset_name, "image", encoder_name, dimension
+                    一个包含 (所有节点的增强图像嵌入, 所有节点的增强文本嵌入) 的元组。
+                    如果无法获取任何所需数据，则返回 None。
+            """
+            dataset_name = self.config.dataset.name
+            encoder_name = self.config.embedding.encoder_name
+            dimension = self.config.embedding.dimension
+    
+            image_embeddings = self.embedding_manager.get_embedding(
+                dataset_name, "image", encoder_name, dimension
         )
         text_embeddings = self.embedding_manager.get_embedding(
             dataset_name, "text", encoder_name, dimension

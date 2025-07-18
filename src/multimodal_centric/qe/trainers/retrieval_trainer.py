@@ -13,6 +13,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 from torch.utils.data import DataLoader, TensorDataset, random_split
+from omegaconf import OmegaConf
 
 # 将项目根目录添加到Python路径中
 project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
@@ -34,9 +35,9 @@ class RetrievalTrainer:
         retrieval_params = config.task.retrieval_training
         self.epochs = retrieval_params.epochs
         self.lr = retrieval_params.lr
-        self.batch_size = retrieval_params.get('batch_size', 128)
-        self.patience = retrieval_params.get('patience', 10)
-        self.tau = retrieval_params.get('tau', 0.07)
+        self.batch_size = retrieval_params.batch_size
+        self.patience = retrieval_params.patience
+        self.tau = retrieval_params.tau
 
         self.base_dir = Path(__file__).resolve().parent.parent
         self.model_save_dir = self.base_dir / "trained_models" / self.dataset_name / self.gnn_model_name
@@ -152,8 +153,11 @@ class RetrievalTrainer:
         """
         enhanced_text_embeds, _ = self._get_enhanced_embeddings()
         
-        retrieval_model_params = self.config.task.retrieval_model
+        # 从配置中获取预设的参数，并转换为普通字典
+        retrieval_model_params = OmegaConf.to_container(self.config.task.retrieval_model, resolve=True)
+        # 动态添加 input_dim
         retrieval_model_params['input_dim'] = enhanced_text_embeds.shape[1]
+        # 使用更新后的参数字典实例化模型
         retrieval_model = TwoTowerModel(**retrieval_model_params).to(self.device)
 
         if self.model_save_path.exists():
@@ -161,7 +165,7 @@ class RetrievalTrainer:
             retrieval_model.load_state_dict(torch.load(self.model_save_path, map_location=self.device))
         else:
             print(f"未找到预训练的检索模型于 '{self.model_save_path}'。")
-            retrieval_model = self.train(retrieval_model) # 将正确的模型实例传入训练函数
+            retrieval_model = self.train(retrieval_model)
         
         retrieval_model.eval()
         return retrieval_model

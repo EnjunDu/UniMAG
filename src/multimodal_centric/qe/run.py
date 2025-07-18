@@ -80,8 +80,15 @@ def run_qe(cfg: DictConfig):
 
     print("\n--- 评估完成 ---")
     print("最终结果:")
-    # 使用 OmegaConf.to_yaml 以更好地处理 Hydra 配置对象
-    print(OmegaConf.to_yaml(results))
+    # 将结果转换为普通字典以便打印
+    if isinstance(results, OrderedDict):
+        results = dict(results)
+    if 'text_to_image' in results and isinstance(results['text_to_image'], OrderedDict):
+        results['text_to_image'] = dict(results['text_to_image'])
+    if 'image_to_text' in results and isinstance(results['image_to_text'], OrderedDict):
+        results['image_to_text'] = dict(results['image_to_text'])
+        
+    print(OmegaConf.to_yaml(OmegaConf.create(results)))
     return results
 
 def main_standalone():
