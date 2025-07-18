@@ -29,11 +29,11 @@ class RetrievalTrainer:
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        self.dataset_name = config['dataset']['name']
-        self.gnn_model_name = config['model']['name']
-        retrieval_params = config['retrieval_training']
-        self.epochs = retrieval_params['epochs']
-        self.lr = retrieval_params['lr']
+        self.dataset_name = config.dataset.name
+        self.gnn_model_name = config.model.name
+        retrieval_params = config.task.retrieval_training
+        self.epochs = retrieval_params.epochs
+        self.lr = retrieval_params.lr
         self.batch_size = retrieval_params.get('batch_size', 128)
         self.patience = retrieval_params.get('patience', 10)
         self.tau = retrieval_params.get('tau', 0.07)
@@ -59,8 +59,8 @@ class RetrievalTrainer:
         gnn_model = self.gnn_trainer.train_or_load_model()
         
         evaluator = self.gnn_trainer
-        image_embeds = evaluator.embedding_manager.get_embedding(evaluator.dataset_name, "image", self.config['embedding']['encoder_name'], self.config['embedding']['dimension'])
-        text_embeds = evaluator.embedding_manager.get_embedding(evaluator.dataset_name, "text", self.config['embedding']['encoder_name'], self.config['embedding']['dimension'])
+        image_embeds = evaluator.embedding_manager.get_embedding(evaluator.dataset_name, "image", self.config.embedding.encoder_name, self.config.embedding.dimension)
+        text_embeds = evaluator.embedding_manager.get_embedding(evaluator.dataset_name, "text", self.config.embedding.encoder_name, self.config.embedding.dimension)
         
         features = np.concatenate((text_embeds, image_embeds), axis=1)
         features = torch.from_numpy(features).float().to(self.device)
@@ -152,7 +152,7 @@ class RetrievalTrainer:
         """
         enhanced_text_embeds, _ = self._get_enhanced_embeddings()
         
-        retrieval_model_params = self.config['retrieval_model']
+        retrieval_model_params = self.config.task.retrieval_model
         retrieval_model_params['input_dim'] = enhanced_text_embeds.shape[1]
         retrieval_model = TwoTowerModel(**retrieval_model_params).to(self.device)
 

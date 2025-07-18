@@ -56,12 +56,12 @@ class GNNTrainer:
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        self.dataset_name = self.config['dataset']['name']
-        self.gnn_model_name = self.config['model']['name']
+        self.dataset_name = self.config.dataset.name
+        self.gnn_model_name = self.config.model.name
         
-        train_params = self.config['training']
-        self.epochs = train_params['epochs']
-        self.lr = train_params['lr']
+        train_params = self.config.training
+        self.epochs = train_params.epochs
+        self.lr = train_params.lr
         self.patience = train_params.get('patience', 10)
         self.val_ratio = train_params.get('val_ratio', 0.1)
         self.tau = train_params.get('tau', 0.07)
@@ -71,16 +71,16 @@ class GNNTrainer:
         self.model_save_path = self.model_save_dir / "model.pt"
         os.makedirs(self.model_save_dir, exist_ok=True)
         
-        base_path = self.config.get('dataset', {}).get('data_root')
+        base_path = self.config.dataset.get('data_root')
         self.embedding_manager = EmbeddingManager(base_path=base_path)
         self.graph_loader = GraphLoader(config=self.config)
 
         self.model = self._init_model().to(self.device)
 
     def _init_model(self) -> torch.nn.Module:
-        model_params = self.config['model']['params']
-        encoder_name = self.config['embedding']['encoder_name']
-        dimension = self.config['embedding']['dimension']
+        model_params = self.config.model.params
+        encoder_name = self.config.embedding.encoder_name
+        dimension = self.config.embedding.dimension
         sample_text_embed = self.embedding_manager.get_embedding(self.dataset_name, "text", encoder_name, dimension)
         if sample_text_embed is None: raise ValueError("无法加载嵌入以确定模型输入维度。")
         in_dim = sample_text_embed.shape[1] * 2
@@ -131,8 +131,8 @@ class GNNTrainer:
         train_edge_index = train_edge_index.to(self.device)
         val_edge_index = val_edge_index.to(self.device)
 
-        encoder_name = self.config['embedding']['encoder_name']
-        dimension = self.config['embedding']['dimension']
+        encoder_name = self.config.embedding.encoder_name
+        dimension = self.config.embedding.dimension
         image_embeds = self.embedding_manager.get_embedding(self.dataset_name, "image", encoder_name, dimension)
         text_embeds = self.embedding_manager.get_embedding(self.dataset_name, "text", encoder_name, dimension)
         
