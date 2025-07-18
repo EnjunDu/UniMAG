@@ -17,7 +17,8 @@ from tqdm import tqdm
 import torch
 import spacy
 from PIL import Image
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
+from collections import defaultdict
 
 # 将项目根目录添加到 sys.path
 project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
@@ -43,31 +44,34 @@ class GroundTruthGenerator:
         model_id = "IDEA-Research/grounding-dino-base"
         self.processor = AutoProcessor.from_pretrained(model_id)
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(self.device)
-        self.max_text_length = self.model.config.text_config.max_position_embeddings
+        self.max_text_length = self.model.config.text_config.max_position_embeddings // 2
 
     def extract_noun_phrases(self, text: str) -> List[str]:
         """从给定文本中提取名词短语。"""
         doc = self.nlp(text)
         return [chunk.text for chunk in doc.noun_chunks]
 
-    def generate_for_single_item(self, image_path: str, text: str) -> List[Dict[str, Any]]:
-        """为单个图文对生成定位结果。"""
-        if not image_path or not os.path.exists(image_path) or not text:
-            return []
+    def generate_for_single_item(self, image_path: str, text: str) -> Tuple[List[Dict[str, Any]], str]:
+        """
+        为单个图文对生成定位结果。
+        返回一个元组: (定位结果, 失败原因)
+        """
+        if not image_path or not text:
+            return [], "missing_path_or_text"
+        if not os.path.exists(image_path):
+            return [], "image_not_found"
             
         try:
             image = Image.open(image_path).convert("RGB")
-        except Exception as e:
-            print(f"无法打开图像 {image_path}: {e}")
-            return []
+        except Exception:
+            return [], "image_open_failed"
 
         phrases = self.extract_noun_phrases(text)
         if not phrases:
-            return []
+            return [], "no_noun_phrases"
 
         text_for_grounding = ". ".join(phrases)
         
-        # 增加 return_attention_mask=True 来确保维度一致
         inputs = self.processor(
             images=image, 
             text=text_for_grounding, 
@@ -92,11 +96,15 @@ class GroundTruthGenerator:
         grounding_results = []
         for label, box in zip(results[0]["labels"], results[0]["boxes"]):
             grounding_results.append({"phrase": label, "box": box.cpu().numpy().tolist()})
-        return grounding_results
+        
+        if not grounding_results:
+            return [], "grounding_failed"
+
+        return grounding_results, "success"
 
 def main():
     parser = argparse.ArgumentParser(description="为模态对齐任务生成基准真值文件。")
-    parser.add_argument("--dataset", type=str, required=True, help="要处理的数据集名称 (例如 'Grocery')。")
+    parser.add_argument("--dataset", type=str, required=True, help="要处理的数据集名称 (例如 'books-nc-50')。")
     parser.add_argument("--output_dir", type=str, default="src/multimodal_centric/qe/evaluators/ground_truth", help="输出jsonl文件的目录。")
     args = parser.parse_args()
 
@@ -114,19 +122,23 @@ def main():
         num_nodes = len(node_ids)
         print(f"共找到 {num_nodes} 个节点。")
     except FileNotFoundError as e:
-        print(f"错误: {e}")
+        print(f"错误: 无法加载节点ID文件: {e}")
         sys.exit(1)
 
+    stats = defaultdict(int)
     with open(output_file, 'w', encoding='utf-8') as f:
         for i in tqdm(range(num_nodes), desc=f"处理 {args.dataset}"):
+            stats["total_nodes"] += 1
             raw_data = manager.get_raw_data_by_index(args.dataset, i)
             
             if not raw_data or not raw_data.get("image_path") or not raw_data.get("text"):
+                stats["skipped_no_raw_data"] += 1
                 continue
 
-            grounding_results = generator.generate_for_single_item(raw_data["image_path"], raw_data["text"])
+            grounding_results, status = generator.generate_for_single_item(raw_data["image_path"], raw_data["text"])
             
-            if grounding_results:
+            if status == "success":
+                stats["success"] += 1
                 record = {
                     "node_index": i,
                     "node_id": node_ids[i],
@@ -135,7 +147,17 @@ def main():
                     "grounding": grounding_results
                 }
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
+            else:
+                stats[f"failed_{status}"] += 1
+    
+    print("\n--- 诊断统计 ---")
+    print(f"总共处理节点: {stats['total_nodes']}")
+    print(f"成功生成真值: {stats['success']}")
+    print("失败/跳过原因:")
+    for reason, count in stats.items():
+        if reason not in ["total_nodes", "success"]:
+            print(f"  - {reason}: {count}")
+    print(f"------------------")
     print(f"\n处理完成！基准真值文件已保存到: {output_file}")
 
 if __name__ == "__main__":
