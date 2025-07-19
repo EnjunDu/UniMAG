@@ -1,123 +1,148 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+G2Image.py
+
+功能：
+1. 调用项目内模块加载并处理多模态 embedding
+2. 构建 prompt，并添加生成提示词
+3. 调用 DashScope 文生图 API 生成图片
+"""
+
 import os
 import time
 import requests
-import argparse
+import torch
 import numpy as np
+from typing import Dict
 
-# ======================
-# 配置部分
-# ======================
-BASE_URL = "https://dashscope.aliyuncs.com/api/v1"
-API_KEY = os.getenv("DASHSCOPE_API_KEY")  # 请先导出：export DASHSCOPE_API_KEY=你的密钥
-HEADERS = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json",
-    "X-DashScope-Async": "enable",      # 必选：启用异步处理
-}
+# 引入项目内模块
+from utils.embedding_manager import EmbeddingManager
+from utils.graph_loader import GraphLoader
+from src.model.models import GCN  # Graph Convolutional Network
 
-# ======================
-# 步骤1：创建任务
-# ======================
-def create_task(
-    prompt: str,
-    model: str = "wanx2.1-t2i-turbo",
-    size: str = "1024*1024",
-    n: int = 1,
-    negative_prompt: str = None,
-    seed: int = None,
-    prompt_extend: bool = True,
-    watermark: bool = False,
-) -> str:
-    url = f"{BASE_URL}/services/aigc/text2image/image-synthesis"
-    body = {
+def load_and_process_embeddings(dataset_name: str,
+                                base_path: str = './data',
+                                encoder_name: str = "Qwen/Qwen2.5-VL-3B-Instruct",
+                                dimension: int = 768,
+                                gcn_hidden_dim: int = 64,
+                                gcn_num_layers: int = 3,
+                                gcn_dropout: float = 0.5) -> Dict[str, torch.Tensor]:
+    """
+    使用项目内的 EmbeddingManager 和 GraphLoader 加载原始多模态 embedding 并用 GCN 自动分离模态特征
+    返回 dict: {'image': Tensor, 'text': Tensor}
+    """
+    # 1. 初始化管理器和加载器
+    em = EmbeddingManager(base_path=base_path)
+    gl = GraphLoader(data_root=base_path)
+
+    # 2. 获取原始多模态 embedding
+    embeddings_np = em.get_embedding(
+        dataset_name=dataset_name,
+        modality="multimodal",
+        encoder_name=encoder_name,
+        dimension=dimension
+    )  # 返回 numpy array
+    embeddings = torch.from_numpy(embeddings_np).float().to(em.device)
+
+    # 3. 加载图结构
+    graph_data = gl.load_graph(dataset_name)
+    edge_index = graph_data.edge_index.to(em.device)
+
+    # 4. 初始化并执行 GCN
+    gcn = GCN(
+        in_dim=embeddings.size(1),
+        hidden_dim=gcn_hidden_dim,
+        num_layers=gcn_num_layers,
+        dropout=gcn_dropout
+    ).to(em.device)
+    _, out_v, out_t = gcn(embeddings, edge_index)
+    return {'image': out_v, 'text': out_t}
+
+
+def build_prompt(image_feat: np.ndarray,
+                 text_feat: np.ndarray,
+                 top_k: int = 10) -> str:
+    """
+    从 image/text 特征中各选 top_k 维，生成文本 prompt
+    返回完整 prompt
+    """
+    img_idx = np.argsort(-image_feat)[:top_k]
+    txt_idx = np.argsort(-text_feat)[:top_k]
+    parts = []
+    for idx in img_idx:
+        parts.append(f"图像特征{idx}")
+    for idx in txt_idx:
+        parts.append(f"文本特征{idx}")
+    feat_str = '，'.join(parts)
+    # 添加提示词
+    return f"请基于以下多模态节点特征生成场景图像：{feat_str}。"
+
+# 文生图 API 函数
+API_KEY = os.getenv("DASHSCOPE_API_KEY")
+if not API_KEY:
+    raise RuntimeError("请先设置环境变量 DASHSCOPE_API_KEY")
+SERVICE_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+TASK_URL    = "https://dashscope.aliyuncs.com/api/v1/tasks/{}"
+
+def create_text2image_task(prompt: str,
+                           model: str = "wanx2.1-t2i-turbo",
+                           size: str = "1024*1024",
+                           n: int = 1,
+                           seed: int = None,
+                           prompt_extend: bool = True,
+                           watermark: bool = False) -> str:
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {API_KEY}",
+        "X-DashScope-Async": "enable",
+    }
+    payload = {
         "model": model,
         "input": {"prompt": prompt},
-        "parameters": {"size": size, "n": n, "prompt_extend": prompt_extend, "watermark": watermark},
+        "parameters": {"size": size, "n": n, "prompt_extend": prompt_extend, "watermark": watermark}
     }
-    if negative_prompt:
-        body["input"]["negative_prompt"] = negative_prompt
     if seed is not None:
-        body["parameters"]["seed"] = seed
-
-    resp = requests.post(url, headers=HEADERS, json=body)
+        payload["parameters"]["seed"] = seed
+    resp = requests.post(SERVICE_URL, json=payload, headers=headers)
     resp.raise_for_status()
-    data = resp.json()
-    return data["output"]["task_id"]
+    return resp.json()["output"]["task_id"]
 
-# ======================
-# 步骤2：轮询查询结果
-# ======================
-def fetch_results(task_id: str, interval: int = 5, timeout: int = 300):
-    url = f"{BASE_URL}/tasks/{task_id}"
-    elapsed = 0
-    while elapsed < timeout:
-        resp = requests.get(url, headers={"Authorization": f"Bearer {API_KEY}"})
+def get_task_result(task_id: str, interval: int = 5, timeout: int = 300) -> list:
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+    start = time.time()
+    while True:
+        resp = requests.get(TASK_URL.format(task_id), headers=headers)
         resp.raise_for_status()
-        result = resp.json()["output"]
-        status = result["task_status"]
+        out = resp.json()["output"]
+        status = out["task_status"]
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 状态：{status}")
         if status == "SUCCEEDED":
-            return result["results"]
-        elif status in ("FAILED", "CANCELED"):
-            raise RuntimeError(f"任务 {task_id} 失败，原因：{result.get('code')} / {result.get('message')}")
+            return [i.get("url") for i in out.get("results", [])]
+        if status in ("FAILED","CANCELED"):
+            raise RuntimeError(f"任务失败：{out}")
+        if time.time()-start>timeout:
+            raise TimeoutError("超时")
         time.sleep(interval)
-        elapsed += interval
-    raise TimeoutError(f"等待任务 {task_id} 超时，已用 {timeout} 秒")
 
-# ======================
-# 主流程：接收已处理的嵌入并生成图像
-# ======================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="基于已处理的图像和文本模态嵌入直接生成图像描述"
-    )
-    parser.add_argument("--img-emb",     type=str, required=True, help="图像嵌入文件路径 (.npy)")
-    parser.add_argument("--txt-emb",     type=str, required=True, help="文本嵌入文件路径 (.npy)")
-    parser.add_argument("--top-k",       type=int, default=10, help="提示中展示前 K 维特征")
-    parser.add_argument("--model",       type=str, default="wanx2.1-t2i-turbo")
-    parser.add_argument("--size",        type=str, default="1024*1024")
-    parser.add_argument("--n",           type=int, default=1)
-    parser.add_argument("--seed",        type=int, default=None)
-    parser.add_argument("--negative-prompt", type=str, default=None)
-    parser.add_argument("--prompt-extend",   action="store_true", help="启用模型默认提示扩展")
-    parser.add_argument("--watermark",       action="store_true", help="输出图像是否带水印")
-    args = parser.parse_args()
+    # 参数区
+    DATASET_NAME   = "Grocery"
+    TARGET_NODE_ID = 0
+    BASE_PATH      = "./data"
+    TOP_K          = 10
 
-    # 加载嵌入向量
-    img_vec = np.load(args.img_emb)
-    txt_vec = np.load(args.txt_emb)
-    top_k  = args.top_k
-    img_list = img_vec[:top_k].tolist()
-    txt_list = txt_vec[:top_k].tolist()
+    # 加载并处理 embedding
+    feats = load_and_process_embeddings(DATASET_NAME, BASE_PATH)
 
     # 构建 prompt
-    prompt = f"""
-你正在观察一个多模态属性图中的节点。以下是该节点的前{top_k}维模态特征：
+    img_feat = feats['image'][TARGET_NODE_ID].cpu().numpy()
+    txt_feat = feats['text'][TARGET_NODE_ID].cpu().numpy()
+    prompt = build_prompt(img_feat, txt_feat, TOP_K)
+    print("生成的 prompt: ", prompt)
 
-图像模态特征: {img_list}
-文本模态特征: {txt_list}
-
-请结合这些特征，推测该节点可能代表的内容，然后生成一张图片描述目标节点。无需给出推理过程。
-"""
-
-    # 发起任务
-    task_id = create_task(
-        prompt=prompt,
-        model=args.model,
-        size=args.size,
-        n=args.n,
-        negative_prompt=args.negative_prompt,
-        seed=args.seed,
-        prompt_extend=args.prompt_extend,
-        watermark=args.watermark,
-    )
-    print(f"已创建任务，task_id={task_id}")
-
-    # 查询并打印结果
-    try:
-        results = fetch_results(task_id)
-        for idx, item in enumerate(results, 1):
-            print(f"[图{idx}] URL: {item['url']}")
-    except Exception as e:
-        print("查询失败：", e)
+    # 提交并获取图片
+    task_id = create_text2image_task(prompt)
+    print("task_id=", task_id)
+    urls = get_task_result(task_id)
+    for i, url in enumerate(urls, 1):
+        print(f"第{i}张图: {url}")
