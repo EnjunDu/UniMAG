@@ -2,7 +2,8 @@ import torch
 import numpy as np
 from PIL import Image
 from typing import List, Optional, Union, Literal
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+from transformers import AutoModelForImageTextToText
+from transformers import AutoProcessor
 import logging
 from tqdm import tqdm
 from pathlib import Path
@@ -64,7 +65,7 @@ class QwenVLEncoder(BaseEncoder):
             if self.attn_implementation and self.device and self.device.startswith("cuda"):
                 model_kwargs["attn_implementation"] = self.attn_implementation
             
-            self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(self.model_name, **model_kwargs)
+            self.model = AutoModelForImageTextToText.from_pretrained(self.model_name, **model_kwargs)
             
             if self.device and ("device_map" not in model_kwargs or model_kwargs.get("device_map") is None):
                 self.model = self.model.to(self.device)
@@ -124,9 +125,9 @@ class QwenVLEncoder(BaseEncoder):
 
         # 根据是否输出特征图，决定如何组合和返回结果
         if output_feature_map:
-            # 返回一个包含所有批次特征图（作为单独的numpy数组）的列表。
-            # 调用者将负责处理这个列表。
-            return all_outputs
+            if not all_outputs:
+                return np.array([])
+            return np.concatenate(all_outputs, axis=0)
 
         # 合并嵌入向量
         final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float16)
@@ -139,31 +140,39 @@ class QwenVLEncoder(BaseEncoder):
             
         return final_embeddings
 
-    def encode_image(self, image_paths: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
+    def encode_image(self, images: List[Union[str, Image.Image]], output_feature_map: bool = False, **kwargs) -> np.ndarray:
         native_dim = self.model.config.hidden_size
-        if not image_paths: return np.empty((0, native_dim))
+        if not images: return np.empty((0, native_dim))
 
-        non_empty_paths, non_empty_indices = [], []
-        for i, path in enumerate(image_paths):
-            if path and str(path).strip() and Path(path).exists():
-                non_empty_paths.append(path)
-                non_empty_indices.append(i)
+        valid_images, valid_indices = [], []
+        for i, item in enumerate(images):
+            if isinstance(item, str):
+                if item and item.strip() and Path(item).exists():
+                    valid_images.append(Image.open(item).convert('RGB'))
+                    valid_indices.append(i)
+            elif isinstance(item, Image.Image):
+                valid_images.append(item)
+                valid_indices.append(i)
 
-        if not non_empty_paths:
+        if not valid_images:
             if output_feature_map:
-                return np.empty((len(image_paths), 0, native_dim), dtype=np.float16)
-            return np.zeros((len(image_paths), native_dim), dtype=np.float16)
+                return np.empty((len(images), 0, native_dim), dtype=np.float16)
+            return np.zeros((len(images), native_dim), dtype=np.float16)
 
         batch_size = kwargs.get('batch_size', 4)
         all_outputs = []
 
         with torch.no_grad():
-            for i in tqdm(range(0, len(non_empty_paths), batch_size), desc="编码图像"):
-                batch_paths = non_empty_paths[i:i + batch_size]
-                messages_batch = [[{"role": "user", "content": [{"type": "image", "image": f"file://{path}"}, {"type": "text", "text": "Please describe the image in detail."}]}] for path in batch_paths]
+            for i in tqdm(range(0, len(valid_images), batch_size), desc="编码图像"):
+                batch_images = valid_images[i:i + batch_size]
+                # 为每个图像创建一个符合Qwen-VL格式的虚拟文本提示
+                dummy_texts = [f"Picture 1:<img>\nDescribe the image."] * len(batch_images)
+                
+                # 使用 apply_chat_template 来格式化输入
+                messages_batch = [[{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "Describe the image."}]}] for _ in batch_images]
                 texts_formatted = [self.processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False) for msgs in messages_batch]
-                image_inputs, _ = process_vision_info(messages_batch)
-                inputs = self.processor(text=texts_formatted, images=image_inputs, padding=True, return_tensors="pt").to(self.model.device)
+
+                inputs = self.processor(text=texts_formatted, images=batch_images, padding=True, return_tensors="pt").to(self.model.device)
                 outputs = self.model(**inputs, output_hidden_states=True)
                 
                 if output_feature_map:
@@ -173,28 +182,39 @@ class QwenVLEncoder(BaseEncoder):
                     all_outputs.append(batch_embeddings)
         
         if output_feature_map:
-            return all_outputs
+            if not all_outputs:
+                return np.array([])
+            return np.concatenate(all_outputs, axis=0)
 
-        final_embeddings = np.zeros((len(image_paths), native_dim), dtype=np.float16)
+        final_embeddings = np.zeros((len(images), native_dim), dtype=np.float16)
         processed_count = 0
         for batch_embeddings in all_outputs:
             batch_size = batch_embeddings.shape[0]
-            original_indices = non_empty_indices[processed_count : processed_count + batch_size]
+            original_indices = valid_indices[processed_count : processed_count + batch_size]
             final_embeddings[original_indices, :] = batch_embeddings
             processed_count += batch_size
 
         return final_embeddings
 
-    def encode_multimodal(self, texts: List[str], image_paths: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
+    def encode_multimodal(self, texts: List[str], images: List[Union[str, Image.Image]], output_feature_map: bool = False, **kwargs) -> np.ndarray:
         native_dim = self.model.config.hidden_size
-        if len(texts) != len(image_paths): raise ValueError("文本和图像列表的长度必须相等")
+        if len(texts) != len(images): raise ValueError("文本和图像列表的长度必须相等")
         if not texts: return np.empty((0, native_dim))
 
-        valid_indices, valid_texts, valid_image_paths = [], [], []
-        for i, (text, path) in enumerate(zip(texts, image_paths)):
-            if text and str(path).strip() and Path(path).exists():
-                valid_indices.append(i); valid_texts.append(text); valid_image_paths.append(path)
-        
+        valid_indices, valid_texts, valid_images = [], [], []
+        for i, (text, item) in enumerate(zip(texts, images)):
+            if not text or not text.strip(): continue
+            
+            if isinstance(item, str):
+                if item and item.strip() and Path(item).exists():
+                    valid_images.append(Image.open(item).convert('RGB'))
+                    valid_texts.append(text)
+                    valid_indices.append(i)
+            elif isinstance(item, Image.Image):
+                valid_images.append(item)
+                valid_texts.append(text)
+                valid_indices.append(i)
+
         if not valid_texts:
             if output_feature_map:
                 return np.empty((len(texts), 0, native_dim), dtype=np.float16)
@@ -206,11 +226,8 @@ class QwenVLEncoder(BaseEncoder):
         with torch.no_grad():
             for i in tqdm(range(0, len(valid_texts), batch_size), desc="编码多模态"):
                 batch_texts = valid_texts[i:i + batch_size]
-                batch_paths = valid_image_paths[i:i + batch_size]
-                messages_batch = [[{"role": "user", "content": [{"type": "image", "image": f"file://{path}"}, {"type": "text", "text": text}]}] for text, path in zip(batch_texts, batch_paths)]
-                texts_formatted = [self.processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False) for msgs in messages_batch]
-                image_inputs, _ = process_vision_info(messages_batch)
-                inputs = self.processor(text=texts_formatted, images=image_inputs, padding=True, return_tensors="pt").to(self.model.device)
+                batch_images = valid_images[i:i + batch_size]
+                inputs = self.processor(text=batch_texts, images=batch_images, padding=True, return_tensors="pt").to(self.model.device)
                 outputs = self.model(**inputs, output_hidden_states=True)
                 
                 if output_feature_map:
@@ -220,7 +237,9 @@ class QwenVLEncoder(BaseEncoder):
                     all_outputs.append(batch_embeddings)
 
         if output_feature_map:
-            return all_outputs
+            if not all_outputs:
+                return np.array([])
+            return np.concatenate(all_outputs, axis=0)
 
         final_embeddings = np.zeros((len(texts), native_dim), dtype=np.float16)
         processed_count = 0
@@ -247,17 +266,23 @@ class QwenVLEncoderWithDimension(QwenVLEncoder):
     def _apply_dimension_reduction(self, embeddings: np.ndarray) -> np.ndarray:
         return self.dimension_reducer.transform(embeddings)
 
-    def encode_text(self, texts: List[str], **kwargs) -> np.ndarray:
-        native_embeddings = super().encode_text(texts, **kwargs)
-        return self._apply_dimension_reduction(native_embeddings)
-    
-    def encode_image(self, image_paths: List[str], **kwargs) -> np.ndarray:
-        native_embeddings = super().encode_image(image_paths, **kwargs)
-        return self._apply_dimension_reduction(native_embeddings)
-    
-    def encode_multimodal(self, texts: List[str], image_paths: List[str], **kwargs) -> np.ndarray:
-        native_embeddings = super().encode_multimodal(texts, image_paths, **kwargs)
-        return self._apply_dimension_reduction(native_embeddings)
+    def encode_text(self, texts: List[str], output_feature_map: bool = False, **kwargs) -> np.ndarray:
+        native_output = super().encode_text(texts, output_feature_map=output_feature_map, **kwargs)
+        if output_feature_map:
+            return native_output
+        return self._apply_dimension_reduction(native_output)
+
+    def encode_image(self, images: List[Union[str, Image.Image]], output_feature_map: bool = False, **kwargs) -> np.ndarray:
+        native_output = super().encode_image(images, output_feature_map=output_feature_map, **kwargs)
+        if output_feature_map:
+            return native_output
+        return self._apply_dimension_reduction(native_output)
+
+    def encode_multimodal(self, texts: List[str], images: List[Union[str, Image.Image]], output_feature_map: bool = False, **kwargs) -> np.ndarray:
+        native_output = super().encode_multimodal(texts, images, output_feature_map=output_feature_map, **kwargs)
+        if output_feature_map:
+            return native_output
+        return self._apply_dimension_reduction(native_output)
     
     def get_native_embedding_dim(self) -> int:
         return self.target_dimension

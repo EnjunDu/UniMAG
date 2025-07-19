@@ -1,0 +1,12 @@
+name: Grocery
+data_root: /home/ai/MMAG
+
+graph_path: /home/ai/MMAG/Grocery/GroceryGraph.pt
+v_emb_path: /home/ai/MMAG/Grocery/image_features/Grocery_image_Qwen_Qwen2_5_VL_3B_Instruct_768d.npy
+t_emb_path: /home/ai/MMAG/Grocery/text_features/Grocery_text_Qwen_Qwen2_5_VL_3B_Instruct_768d.npy
+train_ratio: 0.6
+val_ratio: 0.2
+lp_val_ratio: 0.1
+lp_test_ratio: 0.2
+edge_split_path: None
+num_neg: 1000

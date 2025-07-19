@@ -1,6 +1,7 @@
 name: GAT
-num_layers: 3
-hidden_dim: 256
-dropout: 0.75
-att_dropout: 0
-heads: 3
+params:
+  num_layers: 3
+  hidden_dim: 256
+  dropout: 0.1
+  att_dropout: 0
+  heads: 3

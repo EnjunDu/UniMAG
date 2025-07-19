@@ -1,5 +1,6 @@
 name: GraphSAGE
-num_layers: 3
-hidden_dim: 256
-dropout: 0.02
+params:
+  num_layers: 3
+  hidden_dim: 256
+  dropout: 0.02
 

@@ -5,3 +5,6 @@
 .kilocodeignore
 **/__pycache__
 .DS_Store
+hugging_face
+outputs
+test_embedding_manager.py

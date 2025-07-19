@@ -26,6 +26,7 @@ from embedding_converter.utils.quality_checker import QualityChecker
 from embedding_converter.utils.config_loader import load_embedding_config
 from embedding_converter.utils.storage_manager import StorageManager
 from embedding_converter.utils.convert_magb_text_to_mmgraph import convert_csv_to_jsonl
+from embedding_converter.utils.feature_sanitizer import FeatureSanitizer
 
 # 导入此包以触发所有编码器的自动注册
 from embedding_converter import encoders
@@ -68,6 +69,7 @@ class FeaturePipeline:
         self.cache_dir = encoder_cfg.get("cache_dir")
         
         self.quality_checker = QualityChecker()
+        self.sanitizer = FeatureSanitizer()
         self._encoders: Dict[str, BaseEncoder] = {}
 
     def _get_encoder(self, modality: str, target_dim: Optional[int] = None) -> BaseEncoder:
@@ -247,7 +249,11 @@ class FeaturePipeline:
                 continue
                 
             self.storage_manager.save_features(embeddings, feature_path)
+            
+            # 质量检查与清理
             self.quality_checker.check_feature_file(feature_path, target_dim)
+            self.sanitizer.sanitize_file(feature_path)
+            
             results[modality] = str(feature_path)
             
         self._update_dataset_metadata(dataset_name, results)

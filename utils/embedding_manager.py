@@ -9,8 +9,10 @@
 import sys
 from pathlib import Path
 import numpy as np
-from typing import Optional, Union, List, Any,Dict
+from typing import Optional, Union, List, Any, Dict
 from PIL.Image import Image
+import json
+import glob
 
 # 将项目根目录添加到Python路径中
 project_root = Path(__file__).resolve().parent.parent
@@ -26,9 +28,9 @@ from embedding_converter import encoders
 
 class EmbeddingManager:
     """
-    一个高级API，用于获取和查看预先生成的嵌入向量。
+    一个高级API，用于获取和查看预先生成的嵌入向量以及原始数据。
     """
-    def __init__(self, base_path: Optional[Union[str, Path]] = None):
+    def __init__(self, base_path: Optional[Union[str, Path]] = None, config: Optional[Dict[str, Any]] = None, device: Optional[str] = "cuda"):
         """
         初始化嵌入管理器。
 
@@ -36,8 +38,14 @@ class EmbeddingManager:
             base_path (Optional[Union[str, Path]]):
                 数据集的根目录路径。如果未提供，
                 将使用StorageManager中的默认路径 (例如 /home/ai/MMAG)。
+            config (Optional[Dict[str, Any]]):
+                一个可选的配置字典，用于在即时生成嵌入时初始化编码器。
+            device (Optional[str]):
+                一个可选的设备字符串 (例如 "cuda:0")，用于覆盖config中的设备设置。
         """
         self._storage = StorageManager(base_path=base_path)
+        self.config = config or {}
+        self.device = device
         self._encoders: Dict[str, Any] = {}
 
     def get_embedding(
@@ -51,13 +59,13 @@ class EmbeddingManager:
         获取指定参数的嵌入向量。
 
         Args:
-            dataset_name (str): 数据集名称 (例如 "books-nc-50")。
+            dataset_name (str): 数据集名称 (例如 "books-nc")。
             modality (str): 模态 ("text", "image", 或 "multimodal")。
             encoder_name (str): 编码器模型的Hugging Face名称 (例如 "Qwen/Qwen2.5-VL-3B-Instruct")。
             dimension (Optional[int]): 特征维度。如果为None，则获取原生维度特征。
 
         Returns:
-            np.ndarray: 加载的嵌入向量Numpy数组。如果文件不存在则返回None。
+            Optional[np.ndarray]: 加载的嵌入向量Numpy数组。如果文件不存在则返回None。
         """
         feature_path = self._storage.get_feature_path(
             dataset_name=dataset_name,
@@ -69,15 +77,51 @@ class EmbeddingManager:
         if not feature_path.exists():
             print(f"警告: 未找到对应的嵌入文件: {feature_path}")
             return None
-        
         return self._storage.load_features(feature_path)
+
+    def get_raw_data_by_index(self, dataset_name: str, node_index: int) -> Optional[Dict[str, str]]:
+        """
+        根据节点在特征文件中的索引，获取其原始文本和图像路径。
+
+        Args:
+            dataset_name (str): 数据集名称。
+            node_index (int): 节点的索引。
+
+        Returns:
+            Optional[Dict[str, str]]: 包含 'text' 和 'image_path' 的字典，如果找不到则返回None。
+        """
+        try:
+            node_ids = self._storage.load_node_ids(dataset_name)
+            if node_index >= len(node_ids):
+                print(f"错误: 索引 {node_index} 超出范围。")
+                return None
+            target_id = node_ids[node_index]
+
+            text_map = self._storage.load_raw_text_map(dataset_name)
+            text = text_map.get(target_id, "")
+
+            image_map = self._storage.load_image_path_map(dataset_name)
+            image_path = image_map.get(target_id, "")
+            
+            if not text and not image_path:
+                print(f"警告: 未能为ID '{target_id}' 找到文本或图像。")
+                return None
+
+            return {"text": text, "image_path": str(image_path)}
+
+        except FileNotFoundError as e:
+            print(f"错误: {e}")
+            return None
+        except Exception as e:
+            print(f"获取原始数据时发生未知错误: {e}")
+            return None
 
     def generate_embedding(
         self,
         data: Union[List[str], List[Image], tuple],
         modality: str,
-        encoder_type: str,
-        encoder_name: str,
+        encoder_type: Optional[str] = None,
+        encoder_name: Optional[str] = None,
         dimension: Optional[int] = None,
         output_feature_map: bool = False,
         **kwargs
@@ -98,26 +142,52 @@ class EmbeddingManager:
             **kwargs: 传递给编码器的其他参数 (例如, cache_dir, device)。
 
         Returns:
-            np.ndarray: 生成的嵌入向量或特征图。
+            Optional[np.ndarray]: 生成的嵌入向量或特征图。
         """
+        # 如果未提供编码器信息，则尝试从 self.config 中获取
+        if not encoder_type:
+            encoder_type = self.config.get('embedding', {}).get('encoder_type')
+            if not encoder_type:
+                raise ValueError("必须提供 encoder_type 或在 EmbeddingManager 初始化时传入含该值的 config。")
+        if not encoder_name:
+            encoder_name = self.config.get('embedding', {}).get('encoder_name')
+            if not encoder_name:
+                raise ValueError("必须提供 encoder_name 或在 EmbeddingManager 初始化时传入含该值的 config。")
+
         try:
             modality_enum = ModalityType(modality)
         except ValueError:
             print(f"错误: 不支持的模态 '{modality}'")
             return None
 
-        encoder_instance_key = f"{encoder_type}_{encoder_name}_{dimension or 'native'}"
-        if encoder_instance_key not in self._encoders:
-            factory_encoder_type = f"{encoder_type}_with_dim" if dimension else encoder_type
-            
-            encoder_kwargs = {
-                'model_name': encoder_name,
-                'cache_dir': kwargs.get('cache_dir'),
-                'device': kwargs.get('device')
-            }
-            if dimension:
-                encoder_kwargs['target_dimension'] = dimension
+        # 优先使用 generate_embedding 调用时传入的参数，然后使用 manager 初始化时的参数
+        final_device = kwargs.get('device', self.device)
+        
+        # 从 self.config 中提取编码器和模型的特定参数
+        encoder_params = self.config.get('embedding', {})
+        
+        # 构建 encoder_kwargs
 
+        encoder_kwargs = {
+            'model_name': encoder_name,
+            'cache_dir': kwargs.get('cache_dir', encoder_params.get('cache_dir')),
+            'device': final_device,
+            **(self.config.get('model', {}).get('params', {}))
+        }
+        
+        # 处理维度
+        final_dimension = dimension
+        if final_dimension is None and 'dimension' in encoder_params:
+            final_dimension = encoder_params['dimension']
+
+        factory_encoder_type = f"{encoder_type}_with_dim" if final_dimension else encoder_type
+        if final_dimension:
+            encoder_kwargs['target_dimension'] = final_dimension
+
+        # 创建唯一的编码器实例键
+        encoder_instance_key = f"{factory_encoder_type}_{encoder_name}_{final_dimension or 'native'}_{final_device}"
+
+        if encoder_instance_key not in self._encoders:
             self._encoders[encoder_instance_key] = EncoderFactory.create_encoder(factory_encoder_type, **encoder_kwargs)
         
         encoder = self._encoders[encoder_instance_key]
@@ -129,7 +199,6 @@ class EmbeddingManager:
         elif modality_enum == ModalityType.MULTIMODAL:
             texts, image_paths = data
             return encoder.encode_multimodal(texts, image_paths, output_feature_map=output_feature_map, **kwargs)
-        
         return None
 
     def view_embedding(
@@ -177,9 +246,9 @@ if __name__ == '__main__':
     # local_manager = EmbeddingManager(base_path="./hugging_face")
 
     # 2. 获取嵌入向量
-    print("\n--- 示例1: 获取 'books-nc-50' 的文本特征 ---")
+    print("\n--- 示例1: 获取 'books-nc' 的文本特征 ---")
     text_embeddings = manager.get_embedding(
-        dataset_name="books-nc-50",
+        dataset_name="books-nc",
         modality="text",
         encoder_name="Qwen/Qwen2.5-VL-3B-Instruct",
         dimension=768
@@ -188,12 +257,12 @@ if __name__ == '__main__':
         print(f"成功获取文本特征，形状: {text_embeddings.shape}, 类型: {text_embeddings.dtype}")
 
     # 3. 查看嵌入向量的详细信息和预览
-    print("\n--- 示例2: 查看 'books-nc-50' 的多模态特征 ---")
+    print("\n--- 示例2: 查看 'books-nc' 的多模态特征 ---")
     manager.view_embedding(
-        dataset_name="books-nc-50",
+        dataset_name="books-nc",
         modality="multimodal",
         encoder_name="Qwen/Qwen2.5-VL-3B-Instruct",
-        dimension=None  # 查看原生维度
+        dimension=None
     )
 
     # 4. 即时生成嵌入
@@ -203,7 +272,20 @@ if __name__ == '__main__':
         data=custom_texts,
         modality="text",
         encoder_type="qwen_vl",
-        encoder_name="Qwen/Qwen2.5-VL-7B-Instruct" # 使用一个具体的模型
+        encoder_name="Qwen/Qwen2.5-VL-7B-Instruct"
     )
     if on_the_fly_embeddings is not None:
         print(f"成功即时生成文本嵌入，形状: {on_the_fly_embeddings.shape}")
+
+    # 5. 根据索引获取原始数据
+    print("\n--- 示例4: 获取 'Grocery' 数据集索引为 2 的节点的原始数据 ---")
+    raw_data = manager.get_raw_data_by_index("Grocery", 2)
+    if raw_data:
+        print(f"  文本: {raw_data['text'][:100]}...")
+        print(f"  图像路径: {raw_data['image_path']}")
+
+    print("\n--- 示例5: 获取 'sports-copurchase' 数据集索引为 10 的节点的原始数据 ---")
+    raw_data_sports = manager.get_raw_data_by_index("sports-copurchase", 10)
+    if raw_data_sports:
+        print(f"  文本: {raw_data_sports['text'][:100]}...")
+        print(f"  图像路径: {raw_data_sports['image_path']}")
