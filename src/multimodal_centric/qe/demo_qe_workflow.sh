@@ -106,14 +106,16 @@ echo "    - Output: An alignment_preprocessed.pt file containing all cached"
 echo "      feature pairs."
 echo ""
 read -p "Press any key to run Stage 1..." -n 1 -s
+# echo ""
+# conda activate MAGB && python src/multimodal_centric/qe/scripts/prepare_alignment_data.py --dataset grocery --stage 1 --workers-per-gpu 10 10 10 10
 echo ""
-conda activate MAGB && python src/multimodal_centric/qe/scripts/prepare_alignment_data.py --dataset grocery --stage 1 --workers-per-gpu 4
-echo ""
+echo "As Stage 1 requires a lot of time, we will skip it for now. The following STEP 4 will use pre-processed data."
 echo "Stage 1 finished."
 read -p "Press any key to run Stage 2..." -n 1 -s
+# echo ""
+# conda activate MAGB && python src/multimodal_centric/qe/scripts/prepare_alignment_data.py --dataset grocery --stage 2 --workers-per-gpu 2 2 2 2
 echo ""
-conda activate MAGB && python src/multimodal_centric/qe/scripts/prepare_alignment_data.py --dataset grocery --stage 2 --workers-per-gpu 2
-echo ""
+echo "As Stage 2 requires a lot of time, we will skip it for now. The following STEP 4 will use pre-processed data."
 echo "[STEP 3/4] Preprocessing for Modality Alignment COMPLETED."
 read -p "Press any key to continue to the next step..." -n 1 -s
 

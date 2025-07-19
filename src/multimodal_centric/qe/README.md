@@ -32,7 +32,7 @@ The behavior of the QE module is entirely controlled by Hydra configuration file
 
 ## Running QE Tasks
 
-All QE tasks are launched through the main entry point `src/main.py`. You can combine different task, model, and dataset configurations directly from the command line.
+All QE tasks are launched through the main entry point `src/main.py`. You can combine different task, model, and dataset configurations directly from the command line. Your can also refer to the `demo_qe_workflow.sh` script for a complete demonstration of the QE workflow.
 
 ### 1. Modality Matching
 
