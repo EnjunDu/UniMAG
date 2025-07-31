@@ -239,9 +239,10 @@ def train_and_eval(config, model, data, run_id=0):
             batch = batch.to(config.device)
             out, out_v, out_t = model(batch.x, batch.edge_index)
             # 只计算子图中的训练节点损失
-            loss_task = criterion(out[batch.train_mask], batch.y[batch.train_mask])
-            loss_v = infoNCE_loss(out_v[batch.train_mask], batch.x[batch.train_mask, :data.v_dim])
-            loss_t = infoNCE_loss(out_t[batch.train_mask], batch.x[batch.train_mask, data.v_dim:])
+            bsz = batch.batch_size
+            loss_task = criterion(out[:bsz], batch.y[:bsz])
+            loss_v = infoNCE_loss(out_v[:bsz], batch.x[:bsz, :data.v_dim])
+            loss_t = infoNCE_loss(out_t[:bsz], batch.x[:bsz, data.v_dim:])
             # print(loss_v)
             # 总损失：任务损失 + 加权的对比损失
             loss = loss_task + config.task.lambda_v * loss_v + config.task.lambda_t * loss_t
