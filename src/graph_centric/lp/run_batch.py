@@ -12,7 +12,8 @@ import torch.optim as optim
 from torch_sparse import SparseTensor
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torch_geometric.loader import LinkNeighborLoader
+from torch_geometric.utils import k_hop_subgraph
+from torch_geometric.loader import NeighborSampler
 
 import os
 def split_edge(graph, val_ratio=0.2, test_ratio=0.2, num_neg=150, path=None):
@@ -21,8 +22,8 @@ def split_edge(graph, val_ratio=0.2, test_ratio=0.2, num_neg=150, path=None):
     else:
         # edges = np.arange(graph.num_edges())
         # edges = np.random.permutation(edges)
-        # edges = torch.arange(graph.num_edges()) 
-        edges = torch.randperm(graph.num_edges()) 
+        # edges = torch.arange(graph.num_edges())
+        edges = torch.randperm(graph.num_edges())
 
         source, target = graph.edges()
 
@@ -40,12 +41,12 @@ def split_edge(graph, val_ratio=0.2, test_ratio=0.2, num_neg=150, path=None):
                     'target_node_neg': val_target_neg},
             'test': {'source_node': test_source, 'target_node': test_target,
                     'target_node_neg': test_target_neg}}
-        if os.path.exists(path):  
+        if os.path.exists(path):
             torch.save(edge_split, os.path.join(path, f'edge_split_{num_neg}.pt'))
 
     return edge_split
 
-        
+
 def load_data(graph_path, v_emb_path, t_emb_path, val_ratio=0.1, test_ratio=0.2, num_neg=150, path=None, fewshots=False, self_loop=False, undirected=False):
     graph = dgl.load_graphs(graph_path)[0][0]
     # 自环、无向图
@@ -56,7 +57,7 @@ def load_data(graph_path, v_emb_path, t_emb_path, val_ratio=0.1, test_ratio=0.2,
     # 嵌入、标签
     # v_x = torch.load(v_emb_path)
     # t_x = torch.load(t_emb_path)
-        # 嵌入、标签
+    # 嵌入、标签
     # v_x = torch.load(v_emb_path)
     # t_x = torch.load(t_emb_path)
     v_x = torch.from_numpy(np.load(v_emb_path)).to(torch.float32)
@@ -76,14 +77,14 @@ def load_data(graph_path, v_emb_path, t_emb_path, val_ratio=0.1, test_ratio=0.2,
     edge_split = split_edge(graph, val_ratio=val_ratio, test_ratio=test_ratio, num_neg=num_neg, path=path)
 
     train_edges = torch.stack(
-        (edge_split['train']['source_node'], edge_split['train']['target_node']), 
+        (edge_split['train']['source_node'], edge_split['train']['target_node']),
         dim=1
     ).t()
     adj_t = SparseTensor.from_edge_index(train_edges).t()
     adj_t = adj_t.to_symmetric()
     src, dst = graph.edges()
     edge_index = torch.stack([src, dst], dim=0)
-    return Data(x=x, v_dim=v_x.size(1), t_dim=t_x.size(1), edge_split=edge_split, edge_index=edge_index, adj_t=adj_t)
+    return Data(x=x, v_dim=v_x.size(1), t_dim=t_x.size(1), edge_split=edge_split, adj_t=edge_index, edge_index=edge_index)
 
 class Linear_v_t(nn.Module):
     def __init__(self, in_channels, out_channels_v, out_channels_t):
@@ -157,33 +158,33 @@ def evaluate(model, predictor, x, adj_t, edge_split, num_neg=1000, k_list=[1,3,1
         src = source_edge[batch]
         dst = target_edge[batch]
 
-        pos_preds.append(predictor(emb[src], emb[dst]).squeeze().cpu()) 
-    pos_out = torch.cat(pos_preds, dim=0)  
+        pos_preds.append(predictor(emb[src], emb[dst]).squeeze().cpu())
+    pos_out = torch.cat(pos_preds, dim=0)
     # 分批计算负样本得分
     neg_preds = []
     num_pos = source_edge.size(0)
 
-    flat_source = source_edge.view(-1, 1).repeat(1, num_neg).view(-1) 
-    flat_neg_target = neg_target_edge.view(-1) 
+    flat_source = source_edge.view(-1, 1).repeat(1, num_neg).view(-1)
+    flat_neg_target = neg_target_edge.view(-1)
     for batch in DataLoader(range(flat_source.size(0)), batch_size):
         src = flat_source[batch]
         neg = flat_neg_target[batch]
-        neg_preds.append(predictor(emb[src], emb[neg]).squeeze().cpu())  
+        neg_preds.append(predictor(emb[src], emb[neg]).squeeze().cpu())
     neg_out = torch.cat(neg_preds, dim=0).view(-1, num_neg)
     # 计算评估指标
-    pos_out = pos_out.unsqueeze(1) 
-    all_scores = torch.cat([pos_out, neg_out], dim=1)  
-    
-    ranks = (all_scores >= pos_out).sum(dim=1) 
+    pos_out = pos_out.unsqueeze(1)
+    all_scores = torch.cat([pos_out, neg_out], dim=1)
+
+    ranks = (all_scores >= pos_out).sum(dim=1)
     # 计算各K值的Hits@K
     hits_results = {}
     for k in sorted(k_list):
         hits_at_k = (ranks <= k).float().mean().item()
         hits_results[f'Hits@{k}'] = hits_at_k
-    
+
     # 计算MRR
     mrr = (1.0 / ranks.float()).mean().item()
-    
+
     return {**hits_results, 'MRR': mrr}
 @torch.no_grad()
 def test(model, predictor, x, adj_t, edge_split, num_neg=1000, k_list=[1,3,10], batch_size=2048):
@@ -205,33 +206,33 @@ def test(model, predictor, x, adj_t, edge_split, num_neg=1000, k_list=[1,3,10], 
         src = source_edge[batch]
         dst = target_edge[batch]
 
-        pos_preds.append(predictor(emb[src], emb[dst]).squeeze().cpu())  
+        pos_preds.append(predictor(emb[src], emb[dst]).squeeze().cpu())
     pos_out = torch.cat(pos_preds, dim=0)  # [num_pos]
     # 分批计算负样本得分
     neg_preds = []
     num_pos = source_edge.size(0)
 
-    flat_source = source_edge.view(-1, 1).repeat(1, num_neg).view(-1) 
-    flat_neg_target = neg_target_edge.view(-1)  
+    flat_source = source_edge.view(-1, 1).repeat(1, num_neg).view(-1)
+    flat_neg_target = neg_target_edge.view(-1)
     for batch in DataLoader(range(flat_source.size(0)), batch_size):
         src = flat_source[batch]
         neg = flat_neg_target[batch]
-        neg_preds.append(predictor(emb[src], emb[neg]).squeeze().cpu()) 
+        neg_preds.append(predictor(emb[src], emb[neg]).squeeze().cpu())
     neg_out = torch.cat(neg_preds, dim=0).view(-1, num_neg)
     # 计算评估指标
-    pos_out = pos_out.unsqueeze(1)  
-    all_scores = torch.cat([pos_out, neg_out], dim=1) 
+    pos_out = pos_out.unsqueeze(1)
+    all_scores = torch.cat([pos_out, neg_out], dim=1)
 
-    ranks = (all_scores >= pos_out).sum(dim=1)  
+    ranks = (all_scores >= pos_out).sum(dim=1)
     # 计算各K值的Hits@K
     hits_results = {}
     for k in sorted(k_list):
         hits_at_k = (ranks <= k).float().mean().item()
         hits_results[f'Hits@{k}'] = hits_at_k
-    
+
     # 计算MRR
     mrr = (1.0 / ranks.float()).mean().item()
-    
+
     return {**hits_results, 'MRR': mrr}
 
 def infoNCE_loss(out, orig_features, tau=0.07):
@@ -244,77 +245,111 @@ def infoNCE_loss(out, orig_features, tau=0.07):
     # 1. 特征归一化
     out_norm = F.normalize(out, p=2, dim=1)
     orig_norm = F.normalize(orig_features, p=2, dim=1)
-    
+
     # 2. 计算相似度矩阵
     sim_matrix = torch.mm(out_norm, orig_norm.t()) / tau  # [batch_size, batch_size]
-    
+
     # 3. 创建标签（对角线为正样本）
     labels = torch.arange(sim_matrix.size(0), device=sim_matrix.device)
-    
+
     # 4. 使用交叉熵损失
     loss = F.cross_entropy(sim_matrix, labels)
-    
+
     return loss
 
-def train(model, predictor, data, config, x, adj_t, edge_split, optimizer, batch_size):
+
+def train(model, predictor, data, config, x, adj_t, edge_split, optimizer,
+          batch_size):
 
     model.train()
     predictor.train()
-    linear_v_t = Linear_v_t(config.model.hidden_dim, data.v_dim, data.t_dim).to(config.device)
+    linear_v_t = Linear_v_t(config.model.hidden_dim, data.v_dim,
+                            data.t_dim).to(config.device)
     linear_v_t.train()
-    train_edge_index = torch.stack([
-        edge_split['train']['source_node'],
-        edge_split['train']['target_node']
-    ], dim=0)
-    loader = LinkNeighborLoader(
-        data=data,
-        edge_label_index=train_edge_index,
-        edge_label=torch.ones(train_edge_index.size(1)),  # 正样本标签
-        num_neighbors=config.task.num_neighbors,#[15,15],#num_neighbors,
-        batch_size=batch_size,
-        shuffle=True,
-        neg_sampling_ratio=0.0,  # 负样本比例 (1:1)
-    )
+    source_edge = edge_split['train']['source_node']
+    target_edge = edge_split['train']['target_node']
+    # print(source_edge.size(0))
     total_loss = total_examples = 0
-    for subgraph in loader:
+    for batch in DataLoader(range(source_edge.size(0)),
+                            batch_size,
+                            shuffle=True):
         optimizer.zero_grad()
-        
-        # 移动到设备（GPU）
-        subgraph = subgraph.to(config.device)
-        
-        # 1. 计算子图节点嵌入
-        emb, out_v, out_t = model(subgraph.x, subgraph.edge_index)
-        out_v, out_t = linear_v_t(out_v, out_t)
-        loss_v = infoNCE_loss(out_v, subgraph.x[:, :data.v_dim])
-        loss_t = infoNCE_loss(out_t, subgraph.x[:, data.v_dim:])
-        # 2. 获取当前批次的正样本边
-        src, dst = subgraph.edge_label_index
-        num_pos = src.size(0)
-        # 3. 计算正样本预测得分
-        pos_out = predictor(emb[src], emb[dst])
-        
-        # 4. 手动生成负样本 - 使用子图节点索引
-        # 为每个源节点随机生成一个负目标节点
-        dst_neg = torch.randint(0, subgraph.num_nodes, (num_pos,), 
-                               dtype=torch.long, device=subgraph.x.device)
-        
-        # 5. 计算负样本预测得分
-        neg_out = predictor(emb[src], emb[dst_neg])
-        
-        # 6. 分别计算正负样本损失（按照整图训练方式）
+
+        # === 1. 从整图中取出本批次的 src 和 dst 正边节点 ===
+        src_nodes = source_edge[batch]
+        dst_nodes = target_edge[batch]
+        # === 2. 从整图中负采样 dst 节点（与 src 组合） ===
+        neg_dst_nodes = torch.randint(low=0,
+                                      high=x.size(0),
+                                      size=src_nodes.size(),
+                                      dtype=torch.long,
+                                      device=x.device)
+        # === 3. 构造将要聚合的所有中心点：正 src/dst 和负 dst ===
+        all_nodes = torch.cat([src_nodes, dst_nodes, neg_dst_nodes],
+                              dim=0).unique()
+        # === 4. 从整图中采样包含这些节点的 k-hop 子图 ===
+        sampler = NeighborSampler(
+            edge_index=data.edge_index,
+            sizes=config.task.num_neighbors,
+            batch_size=len(all_nodes),  # 一次采所有需要的中心节点
+            shuffle=False,
+            num_nodes=x.size(0),
+        )
+        batch_size = all_nodes.size(0)
+        batch_nids = all_nodes
+        # 从整图采样子图
+        bsz, subset, adjs = sampler.sample(batch_nids.cpu())
+        # 获取特征
+        x_sub = x[subset]
+        sub_edge_index = adjs[0].edge_index
+        for i in range(1, len(adjs)):
+            sub_edge_index = torch.cat([sub_edge_index, adjs[i].edge_index],
+                                       dim=1)
+
+        # === 4. 从整图中采样包含这些节点的 k-hop 子图 ===
+        # subset, sub_edge_index, mapping, _ = k_hop_subgraph(
+        #     node_idx=all_nodes,
+        #     num_hops=config.model.num_layers,
+        #     edge_index=data.edge_index,
+        #     relabel_nodes=True,
+        #     num_nodes=x.size(0))
+
+        # x_sub = x[subset]  # 子图节点特征 [#sub_nodes, feat_dim]
+
+        # === 5. 构造映射：将 src/dst/neg_dst 映射到子图中的 index ===
+        node_id_map = {
+            nid.item(): i
+            for i, nid in enumerate(subset)
+        }  # 整图 id -> 子图 id
+        src_sub = torch.tensor([node_id_map[n.item()] for n in src_nodes],
+                               device=x.device)
+        dst_sub = torch.tensor([node_id_map[n.item()] for n in dst_nodes],
+                               device=x.device)
+        neg_dst_sub = torch.tensor(
+            [node_id_map[n.item()] for n in neg_dst_nodes], device=x.device)
+        # === 6. 模型前向传播 ===
+        x_sub.to(config.device)
+        edge_index = sub_edge_index.to(config.device)
+        emb_sub, out_v_sub, out_t_sub = model(x_sub, edge_index)
+        out_v_sub, out_t_sub = linear_v_t(out_v_sub, out_t_sub)
+
+        loss_v = infoNCE_loss(out_v_sub, x_sub[:, :data.v_dim])
+        loss_t = infoNCE_loss(out_t_sub, x_sub[:, data.v_dim:])
+
+        pos_out = predictor(emb_sub[src_sub], emb_sub[dst_sub])
         pos_loss = -torch.log(pos_out + 1e-15).mean()
+
+        neg_out = predictor(emb_sub[src_sub], emb_sub[neg_dst_sub])
         neg_loss = -torch.log(1 - neg_out + 1e-15).mean()
-        
-        # 7. 组合总损失
+
         loss = pos_loss + neg_loss + config.task.lambda_v * loss_v + config.task.lambda_t * loss_t
-        # 8. 反向传播
         loss.backward()
         optimizer.step()
-        
-        # 9. 累积损失统计
-        total_loss += loss.item() * num_pos
-        total_examples += num_pos
-    
+
+        num_examples = pos_out.size(0)
+        total_loss += loss.item() * num_examples
+        total_examples += num_examples
+
     return total_loss / total_examples
 
 
@@ -368,6 +403,8 @@ def run_lp(config):
         optimizer = torch.optim.Adam(list(encoder.parameters()) + list(predictor.parameters()), lr=config.task.lr)
         encoder.reset_parameters() if hasattr(encoder, 'reset_parameters') else None
         predictor.reset_parameters() if hasattr(predictor, 'reset_parameters') else None
+        best_mrr = 0
+        final_mrr_test = 0
         # 训练
         for epoch in range(config.task.n_epochs):
             train_loss = train(encoder, predictor, data, config, data.x, data.adj_t, data.edge_split, optimizer, batch_size=config.task.batch_size)
@@ -377,10 +414,11 @@ def run_lp(config):
                 print("[VAL]")
                 print(results)
                 if results["MRR"] > best_mrr:
+                    best_mrr = results["MRR"]
                     results = test(encoder, predictor, data.x, data.adj_t, data.edge_split, config.dataset.num_neg, k_list=config.task.k_list)
                     final_mrr_test = results["MRR"]
                     print(f"[TEST]")
                     print(results)
-
+        print(f"run {run} test mrr: {final_mrr_test}")
         accs.append(final_mrr_test)
     print(f"Average MRR over {config.task.n_runs} runs: {np.mean(accs) * 100:.2f}")
