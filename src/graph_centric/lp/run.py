@@ -82,7 +82,7 @@ def load_data(graph_path, v_emb_path, t_emb_path, val_ratio=0.1, test_ratio=0.2,
     adj_t = adj_t.to_symmetric()
     src, dst = graph.edges()
     edge_index = torch.stack([src, dst], dim=0)
-    return Data(x=x, v_dim=v_x.size(1), t_dim=t_x.size(1), edge_split=edge_split, adj_t=edge_index)
+    return Data(x=x, v_dim=v_x.size(1), t_dim=t_x.size(1), edge_split=edge_split, adj_t=edge_index, edge_index=edge_index)
 
 class Linear_v_t(nn.Module):
     def __init__(self, in_channels, out_channels_v, out_channels_t):
@@ -340,6 +340,8 @@ def run_lp(config):
         optimizer = torch.optim.Adam(list(encoder.parameters()) + list(predictor.parameters()), lr=config.task.lr)
         encoder.reset_parameters() if hasattr(encoder, 'reset_parameters') else None
         predictor.reset_parameters() if hasattr(predictor, 'reset_parameters') else None
+        best_mrr = 0
+        final_mrr_test = 0
         # 训练
         for epoch in range(config.task.n_epochs):
             train_loss = train(encoder, predictor, data, config, data.x, data.adj_t, data.edge_split, optimizer, batch_size=config.task.batch_size)
@@ -349,10 +351,11 @@ def run_lp(config):
                 print("[VAL]")
                 print(results)
                 if results["MRR"] > best_mrr:
+                    best_mrr = results["MRR"]
                     results = test(encoder, predictor, data.x, data.adj_t, data.edge_split, config.dataset.num_neg, k_list=config.task.k_list)
                     final_mrr_test = results["MRR"]
                     print(f"[TEST]")
                     print(results)
-
+        print(f"run {run} test mrr: {final_mrr_test}")
         accs.append(final_mrr_test)
     print(f"Average MRR over {config.task.n_runs} runs: {np.mean(accs) * 100:.2f}")
