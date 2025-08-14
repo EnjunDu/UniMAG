@@ -32,6 +32,7 @@
 - [Reproducibility & Logging](#reproducibility--logging)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
+- [Citation](#citation)
 
 ---
 
@@ -538,3 +539,27 @@ device: cuda
 ## License
 
 Released under a permissive open-source license. 
+
+---
+
+## Citation
+
+If you find this repository useful, please consider citing our papers:
+
+```bibtex
+@article{du2025graphmaster,
+  title={GraphMaster: Automated Graph Synthesis via LLM Agents in Data-Limited Environments},
+  author={Du, Enjun and Li, Xunkai and Jin, Tian and Zhang, Zhihan and Li, Rong-Hua and Wang, Guoren},
+  journal={arXiv preprint arXiv:2504.00711},
+  year={2025},
+  url={https://arxiv.org/abs/2504.00711}
+}
+
+@article{du2025mokgr,
+  title={Mixture of Length and Pruning Experts for Knowledge Graphs Reasoning},
+  author={Du, Enjun and Liu, Siyi and Zhang, Yongqi},
+  journal={arXiv preprint arXiv:2507.20498},
+  year={2025},
+  url={https://arxiv.org/abs/2507.20498}
+}
+```
